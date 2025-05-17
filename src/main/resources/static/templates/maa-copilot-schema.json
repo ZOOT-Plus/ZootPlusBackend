@@ -60,8 +60,7 @@
         },
         "details": {
           "type": "string",
-          "description": "Operation description",
-          "minLength": 1
+          "description": "Operation description"
         },
         "title_color": {
           "type": "string",
@@ -138,7 +137,6 @@
           "type": "integer",
           "description": "Module requirement, optional, 0 by default",
           "minimum": 0,
-          "maximum": 1,
           "default": 0
         },
         "potentiality": {
@@ -212,8 +210,7 @@
         },
         "cost_changes": {
           "type": "integer",
-          "description": "Waiting until the cost changes for the amount specified, optional, 0 by default.",
-          "minimum": 0
+          "description": "Waiting until the cost changes for the amount specified, optional, 0 by default."
         },
         "cooling": {
           "type": "integer",
@@ -271,6 +268,12 @@
           "default": 0
         },
         "rear_delay": {
+          "type": "integer",
+          "description": "Post-delay in ms, optional, 0 by default.",
+          "minimum": 0,
+          "default": 0
+        },
+        "post_delay": {
           "type": "integer",
           "description": "Post-delay in ms, optional, 0 by default.",
           "minimum": 0,
