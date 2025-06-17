@@ -1,9 +1,11 @@
 [versions]
 # Kotlin & JVM ecosystem
-kotlin = "2.1.20"
+kotlin = "2.1.21"
+kotlin-ksp = "2.1.21-2.0.1"
 kotlinx-coroutines = "1.10.2"
 kotlin-logging = "7.0.7"
 mockk = "1.14.2"
+jimmer = "0.9.93"
 
 # Spring ecosystem
 spring-boot = "3.4.6"
@@ -12,14 +14,11 @@ springdoc-openapi = "2.8.8"
 
 # Gradle plugins
 openapi = "1.9.0"
-kronos-plugin = "0.0.2"
 swagger-generator = "2.19.2"
 git-properties = "2.5.0"
 ktlint-plugin = "12.3.0"
 
 # Database & persistence
-kronos = "0.0.5-SNAPSHOT"
-hikaricp = "6.3.0"
 postgresql = "42.7.6"
 
 # JSON & data processing
@@ -44,14 +43,12 @@ swagger-generator-cli = "7.13.0"
 # Kotlin plugins
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-kapt = { id = "org.jetbrains.kotlin.kapt", version.ref = "kotlin" }
+kotlin-ksp = { id = "com.google.devtools.ksp", version.ref = "kotlin-ksp" }
 kotlin-spring = { id = "org.jetbrains.kotlin.plugin.spring", version.ref = "kotlin" }
 
 # Spring plugins
 spring = { id = "org.springframework.boot", version.ref = "spring-boot" }
 spring-deps = { id = "io.spring.dependency-management", version.ref = "spring-deps" }
-
-# Database plugins
-kronos = { id = "com.kotlinorm.kronos-gradle-plugin", version.ref = "kronos-plugin" }
 
 # Documentation & API plugins
 openapi = { id = "org.springdoc.openapi-gradle-plugin", version.ref = "openapi" }
@@ -90,9 +87,8 @@ json-schema = { module = "com.github.erosb:everit-json-schema", version.ref = "j
 mapstruct = { module = "org.mapstruct:mapstruct", version.ref = "mapstruct" }
 mapstruct-processor = { module = "org.mapstruct:mapstruct-processor", version.ref = "mapstruct" }
 
-kronos-core = { module = "com.kotlinorm:kronos-core", version.ref = "kronos" }
-kronos-jdbc = { module = "com.kotlinorm:kronos-jdbc-wrapper", version.ref = "kronos" }
-hikaricp = { module = "com.zaxxer:HikariCP", version.ref = "hikaricp" }
+jimmer-spring = { module = "org.babyfish.jimmer:jimmer-spring-boot-starter", version.ref = "jimmer" }
+jimmer-ksp = { module = "org.babyfish.jimmer:jimmer-ksp", version.ref = "jimmer" }
 postgresql = { module = "org.postgresql:postgresql", version.ref = "postgresql" }
 
 guava = { module = "com.google.guava:guava", version.ref = "guava" }

@@ -1,108 +1,74 @@
 package plus.maa.backend.repository.entity
 
-import com.kotlinorm.annotations.ColumnType
-import com.kotlinorm.annotations.CreateTime
-import com.kotlinorm.annotations.Default
-import com.kotlinorm.annotations.LogicDelete
-import com.kotlinorm.annotations.Necessary
-import com.kotlinorm.annotations.PrimaryKey
-import com.kotlinorm.annotations.Serialize
-import com.kotlinorm.annotations.Table
-import com.kotlinorm.annotations.TableIndex
-import com.kotlinorm.annotations.UpdateTime
-import com.kotlinorm.enums.KColumnType
-import com.kotlinorm.interfaces.KPojo
+import org.babyfish.jimmer.sql.Entity
+import org.babyfish.jimmer.sql.GeneratedValue
+import org.babyfish.jimmer.sql.GenerationType
+import org.babyfish.jimmer.sql.Id
+import org.babyfish.jimmer.sql.OneToMany
+import org.babyfish.jimmer.sql.Table
 import plus.maa.backend.service.model.CommentStatus
 import plus.maa.backend.service.model.CopilotSetStatus
-import java.io.Serializable
 import java.time.LocalDateTime
 
-@Table("copilot")
-@TableIndex("idx_copilot_stage_name", ["stage_name"])
-@TableIndex("idx_copilot_view", ["views"])
-@TableIndex("idx_hot_score", ["hot_score"])
-data class CopilotEntity(
+@Entity
+@Table(name = "copilot")
+interface CopilotEntity {
     // 迁移时不标记为主键防止生成
     // 自增数字ID
-    @PrimaryKey
-    var copilotId: Long? = null,
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    val copilotId: Long
+
     // 关卡名
-    @Necessary
-    var stageName: String? = null,
+    val stageName: String
+
     // 上传者id
-    @Necessary
-    var uploaderId: String? = null,
+    val uploaderId: String
+
     // 查看次数
-    @Necessary
-    var views: Long? = null,
+    val views: Long
+
     // 评级
-    @Necessary
-    var ratingLevel: Int? = null,
+    val ratingLevel: Int
+
     // 评级比率 十分之一代表半星
-    @Necessary
-    var ratingRatio: Double? = null,
-    @Necessary
-    var likeCount: Long? = null,
-    @Necessary
-    var dislikeCount: Long? = null,
+    val ratingRatio: Double
+    val likeCount: Long
+    val dislikeCount: Long
 
     // 热度
-    @Necessary
-    var hotScore: Double? = null,
+    val hotScore: Double
 
     // 指定干员
 //    @Cascade(["copilotId"], ["copilotId"])
-//    var opers: List<OperatorEntity>? = null,
+    @OneToMany(mappedBy = "copilot")
+    val opers: List<OperatorEntity>
 
     // 文档字段，用于搜索，提取到Copilot类型上
-    @Necessary
-    var title: String? = null,
-    var details: String? = null,
+    val title: String
+    val details: String?
 
     // 首次上传时间
-    @CreateTime
-    var firstUploadTime: LocalDateTime? = null,
+    val firstUploadTime: LocalDateTime
+
     // 更新时间
-    @UpdateTime
-    var uploadTime: LocalDateTime? = null,
+    val uploadTime: LocalDateTime
+
     // 原始数据
-    @Necessary
-    var content: String? = null,
+    val content: String
+
     /**
      * 作业状态，后端默认设置为公开以兼容历史逻辑
      * [plus.maa.backend.service.model.CopilotSetStatus]
      */
-    @Necessary
-    @Serialize
-    @ColumnType(KColumnType.TEXT)
-    var status: CopilotSetStatus? = null,
+    val status: CopilotSetStatus
+
     /**
      * 评论状态
      */
-    @Necessary
-    @Serialize
-    @ColumnType(KColumnType.TEXT)
-    var commentStatus: CommentStatus? = null,
+    val commentStatus: CommentStatus
 
-    @LogicDelete
-    @Default("false")
-    @ColumnType(KColumnType.BIT)
-    var delete: Boolean? = null,
-    var deleteTime: LocalDateTime? = null,
-    @Default("false")
-    @ColumnType(KColumnType.BIT)
-    var notification: Boolean? = null
-
-) : Serializable, KPojo
-
-@Table("copilot_operator")
-@TableIndex("idx_operator_name", ["name"])
-@TableIndex("idx_operator_copilot_id", ["copilot_id"])
-data class OperatorEntity(
-    @PrimaryKey(identity = true)
-    var id: Long? = null,
-    @Necessary
-    var copilotId: Long? = null,
-    @Necessary
-    var name: String? = null,
-) : Serializable, KPojo
+    val delete: Boolean
+    val deleteTime: LocalDateTime?
+    val notification: Boolean
+}

@@ -12,9 +12,13 @@ spring:
       host: 127.0.0.1
   datasource:
     driver-class-name: org.postgresql.Driver
-    jdbc-url: jdbc:postgresql://localhost:5432/zoot
+    url: jdbc:postgresql://localhost:5432/zoot
     username: zoot
     password: 1234
+
+jimmer:
+  show-sql: true
+  pretty-sql: true
 
 maa-copilot:
   backup:

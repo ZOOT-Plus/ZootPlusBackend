@@ -2,8 +2,8 @@ package plus.maa.backend.service
 
 import com.fasterxml.jackson.core.JsonProcessingException
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.kotlinorm.orm.select.select
 import io.github.oshai.kotlinlogging.KotlinLogging
+import org.babyfish.jimmer.sql.kt.KSqlClient
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Pageable
 import org.springframework.data.domain.Sort
@@ -61,6 +61,7 @@ import plus.maa.backend.cache.InternalComposeCache as Cache
  */
 @Service
 class CopilotService(
+    private val sqlClient: KSqlClient,
     private val copilotRepository: CopilotRepository,
     private val ratingService: RatingService,
     private val mongoTemplate: MongoTemplate,
@@ -527,39 +528,39 @@ class CopilotService(
             }
         }
 
-        val copilotsQuery = CopilotEntity().select().page(page, limit)
-            .where {
-                it.uploaderId in inUserIds
-                    && it.stageName like stageNameKeyword
-                    && it.stageName in stageNames
-                    && it.copilotId in inCopilotIds
-                    && it.status == requestStatus
-            }
-            .orderBy {
-                val ord = when (request.orderBy ?: "id") {
-                    "hot" -> it.hotScore
-                    "id" -> it.copilotId
-                    "views" -> it.views
-                    else -> it.copilotId
-                }
-                if (request.desc) ord.desc()
-                else ord.asc()
-            }
-
-        val resultAgg = if (keyword.isNullOrEmpty() &&
-            request.levelKeyword.isNullOrBlank() &&
-            request.uploaderId != null &&
-            request.uploaderId != "me" &&
-            request.operator.isNullOrBlank() &&
-            request.copilotIds.isNullOrEmpty()
-        ) {
-            val r = copilotsQuery.withTotal().queryList()
-            val hasNext = r.first > (page * limit)
-            r to hasNext
-        } else {
-            val r = copilotsQuery.queryList()
-            (0 to r) to (r.size >= limit)
-        }
+//        val copilotsQuery = CopilotEntity().select().page(page, limit)
+//            .where {
+//                it.uploaderId in inUserIds
+//                    && it.stageName like stageNameKeyword
+//                    && it.stageName in stageNames
+//                    && it.copilotId in inCopilotIds
+//                    && it.status == requestStatus
+//            }
+//            .orderBy {
+//                val ord = when (request.orderBy ?: "id") {
+//                    "hot" -> it.hotScore
+//                    "id" -> it.copilotId
+//                    "views" -> it.views
+//                    else -> it.copilotId
+//                }
+//                if (request.desc) ord.desc()
+//                else ord.asc()
+//            }
+//
+//        val resultAgg = if (keyword.isNullOrEmpty() &&
+//            request.levelKeyword.isNullOrBlank() &&
+//            request.uploaderId != null &&
+//            request.uploaderId != "me" &&
+//            request.operator.isNullOrBlank() &&
+//            request.copilotIds.isNullOrEmpty()
+//        ) {
+//            val r = copilotsQuery.withTotal().queryList()
+//            val hasNext = r.first > (page * limit)
+//            r to hasNext
+//        } else {
+//            val r = copilotsQuery.queryList()
+//            (0 to r) to (r.size >= limit)
+//        }
         // TODO 包含或排除干员
 //        request.operator?.removeQuotes()?.split(",")?.filterNot(String::isBlank)?.forEach { oper ->
 //            if (oper.startsWith("~")) {
@@ -572,11 +573,11 @@ class CopilotService(
 //        }
 
 
-        val count = resultAgg.first.first
-        val copilots = resultAgg.first.second
-        val hasNext = resultAgg.second
+        val count = 0
+        val copilots: List<CopilotEntity> = emptyList()
+        val hasNext = false
 
-        val userIds = copilots.mapNotNull { it.uploaderId }
+        val userIds = copilots.map { it.uploaderId }
 
         // 填充前端所需信息
         val maaUsers = hashMapOf<String, UserEntity>()
@@ -587,13 +588,14 @@ class CopilotService(
             info == null
         }.toList()
         if (remainingUserIds.isNotEmpty()) {
-            UserEntity().select().where { it.userId in remainingUserIds }.queryList().forEach {
-                maaUsers.put(it.userId!!, it)
-                Cache.setUserCache(it.userId!!, it)
+            val users = sqlClient.findByIds(UserEntity::class, remainingUserIds)
+            users.forEach {
+                maaUsers.put(it.userId, it)
+                Cache.setUserCache(it.userId, it)
             }
         }
 
-        val copilotIds = copilots.mapNotNull { it.copilotId }
+        val copilotIds = copilots.map { it.copilotId }
         val commentsCount = hashMapOf<Long, Long>()
         val remainingCopilotIds = copilotIds.filter { copilotId ->
             val c = Cache.getCommentCountCache(copilotId)?.also {
@@ -618,7 +620,7 @@ class CopilotService(
         val infos = copilots.map { copilot ->
             copilot.format(
                 null,
-                maaUsers.getOrDefault(copilot.uploaderId!!, UserEntity.UNKNOWN).userName!!,
+                maaUsers.getOrDefault(copilot.uploaderId, UserEntity.UNKNOWN).userName,
                 commentsCount[copilot.copilotId] ?: 0,
             )
         }
@@ -719,23 +721,23 @@ class CopilotService(
 
 
     private fun CopilotEntity.format(rating: Rating?, userName: String, commentsCount: Long) = CopilotInfo(
-        id = copilotId!!,
-        uploadTime = uploadTime!!,
-        uploaderId = uploaderId!!,
+        id = copilotId,
+        uploadTime = uploadTime,
+        uploaderId = uploaderId,
         uploader = userName,
-        views = views!!,
-        hotScore = hotScore!!,
+        views = views,
+        hotScore = hotScore,
         available = true,
-        ratingLevel = ratingLevel!!,
-        notEnoughRating = likeCount!! + dislikeCount!! <= properties.copilot.minValueShowNotEnoughRating,
-        ratingRatio = ratingRatio!!,
+        ratingLevel = ratingLevel,
+        notEnoughRating = likeCount + dislikeCount <= properties.copilot.minValueShowNotEnoughRating,
+        ratingRatio = ratingRatio,
         ratingType = (rating?.rating ?: RatingType.NONE).display,
         commentsCount = commentsCount,
-        commentStatus = commentStatus ?: CommentStatus.ENABLED,
-        content = content ?: "",
-        like = likeCount!!,
-        dislike = dislikeCount!!,
-        status = status!!,
+        commentStatus = commentStatus,
+        content = content,
+        like = likeCount,
+        dislike = dislikeCount,
+        status = status,
     )
 
     /**

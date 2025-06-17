@@ -5,13 +5,13 @@ import org.jlleitschuh.gradle.ktlint.reporter.ReporterType
 plugins {
     java
 
+    alias(libs.plugins.kotlin.ksp)
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.kotlin.kapt)
     alias(libs.plugins.kotlin.spring)
 
     alias(libs.plugins.spring)
     alias(libs.plugins.spring.deps)
-    alias(libs.plugins.kronos)
     alias(libs.plugins.openapi)
     alias(libs.plugins.swagger.generator)
     alias(libs.plugins.git.properties)
@@ -28,6 +28,9 @@ java {
 }
 
 kotlin {
+    sourceSets.main {
+        kotlin.srcDir("build/generated/ksp/main/kotlin")
+    }
     compilerOptions {
         freeCompilerArgs.add("-Xjsr305=strict")
         jvmTarget = JvmTarget.JVM_21
@@ -75,10 +78,9 @@ dependencies {
     // Kotlin-Logging
     implementation(libs.kotlin.logging)
 
-    // Kronos ORM and JDBC with PG
-    implementation(libs.kronos.core)
-    implementation(libs.kronos.jdbc)
-    implementation(libs.hikaricp)
+    // Jimmer ORM and JDBC with PG
+    implementation(libs.jimmer.spring)
+    ksp(libs.jimmer.ksp)
     runtimeOnly(libs.postgresql)
 
     // Hutool
