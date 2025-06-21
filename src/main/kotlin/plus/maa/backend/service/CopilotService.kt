@@ -3,7 +3,10 @@ package plus.maa.backend.service
 import com.fasterxml.jackson.core.JsonProcessingException
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.github.oshai.kotlinlogging.KotlinLogging
-import org.babyfish.jimmer.sql.kt.KSqlClient
+import org.ktorm.database.Database
+import org.ktorm.dsl.inList
+import org.ktorm.entity.filter
+import org.ktorm.entity.forEach
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Pageable
 import org.springframework.data.domain.Sort
@@ -38,6 +41,7 @@ import plus.maa.backend.repository.entity.CopilotEntity
 import plus.maa.backend.repository.entity.MaaUser
 import plus.maa.backend.repository.entity.Rating
 import plus.maa.backend.repository.entity.UserEntity
+import plus.maa.backend.repository.entity.users
 import plus.maa.backend.service.level.ArkLevelService
 import plus.maa.backend.service.model.CommentStatus
 import plus.maa.backend.service.model.CopilotSetStatus
@@ -61,7 +65,7 @@ import plus.maa.backend.cache.InternalComposeCache as Cache
  */
 @Service
 class CopilotService(
-    private val sqlClient: KSqlClient,
+    private val database: Database,
     private val copilotRepository: CopilotRepository,
     private val ratingService: RatingService,
     private val mongoTemplate: MongoTemplate,
@@ -588,7 +592,7 @@ class CopilotService(
             info == null
         }.toList()
         if (remainingUserIds.isNotEmpty()) {
-            val users = sqlClient.findByIds(UserEntity::class, remainingUserIds)
+            val users = database.users.filter { it.userId.inList(remainingUserIds) }
             users.forEach {
                 maaUsers.put(it.userId, it)
                 Cache.setUserCache(it.userId, it)
@@ -729,15 +733,15 @@ class CopilotService(
         hotScore = hotScore,
         available = true,
         ratingLevel = ratingLevel,
-        notEnoughRating = likeCount + dislikeCount <= properties.copilot.minValueShowNotEnoughRating,
+        notEnoughRating = likeCount + dislikeCount <= this@CopilotService.properties.copilot.minValueShowNotEnoughRating,
         ratingRatio = ratingRatio,
         ratingType = (rating?.rating ?: RatingType.NONE).display,
         commentsCount = commentsCount,
-        commentStatus = commentStatus,
+        commentStatus = commentStatus!!,
         content = content,
         like = likeCount,
         dislike = dislikeCount,
-        status = status,
+        status = status!!,
     )
 
     /**

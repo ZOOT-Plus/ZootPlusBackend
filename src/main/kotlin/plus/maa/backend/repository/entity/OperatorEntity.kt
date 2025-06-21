@@ -1,24 +1,24 @@
 package plus.maa.backend.repository.entity
 
-import org.babyfish.jimmer.sql.Entity
-import org.babyfish.jimmer.sql.GeneratedValue
-import org.babyfish.jimmer.sql.GenerationType
-import org.babyfish.jimmer.sql.Id
-import org.babyfish.jimmer.sql.IdView
-import org.babyfish.jimmer.sql.JoinColumn
-import org.babyfish.jimmer.sql.ManyToOne
-import org.babyfish.jimmer.sql.Table
+import org.ktorm.database.Database
+import org.ktorm.entity.Entity
+import org.ktorm.entity.sequenceOf
+import org.ktorm.schema.Table
+import org.ktorm.schema.long
+import org.ktorm.schema.varchar
 
-@Entity
-@Table(name = "copilot_operator")
-interface OperatorEntity {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+interface OperatorEntity: Entity<OperatorEntity> {
     val id: Long
-    @IdView
-    val copilotId: Long
-    @ManyToOne
-    @JoinColumn(name = "copilot_id")
-    val copilot: CopilotEntity
-    val name: String
+    var copilot: CopilotEntity
+    var name: String
+
+    companion object: Entity.Factory<OperatorEntity>()
 }
+
+object Operators : Table<OperatorEntity>("copilot_operator") {
+    val id = long("id").primaryKey().bindTo { it.id }
+    val copilotId = long("copilot_id").references(Copilots) { it.copilot }
+    val name = varchar("name").bindTo { it.name }
+}
+
+val Database.operators get() = this.sequenceOf(Operators)

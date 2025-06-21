@@ -5,10 +5,9 @@ kotlin-ksp = "2.1.21-2.0.1"
 kotlinx-coroutines = "1.10.2"
 kotlin-logging = "7.0.7"
 mockk = "1.14.2"
-jimmer = "0.9.93"
 
 # Spring ecosystem
-spring-boot = "3.4.6"
+spring-boot = "3.5.3"
 spring-deps = "1.1.7"
 springdoc-openapi = "2.8.8"
 
@@ -19,6 +18,7 @@ git-properties = "2.5.0"
 ktlint-plugin = "12.3.0"
 
 # Database & persistence
+ktorm = "4.1.1"
 postgresql = "42.7.6"
 
 # JSON & data processing
@@ -73,10 +73,11 @@ spring-validation = { module = "org.springframework.boot:spring-boot-starter-val
 spring-cache = { module = "org.springframework.boot:spring-boot-starter-cache" }
 spring-processor = { module = "org.springframework.boot:spring-boot-configuration-processor" }
 spring-test = { module = "org.springframework.boot:spring-boot-starter-test" }
-mockk = { module = "io.mockk:mockk",  version.ref = "mockk" }
+spring-jdbc = { module = "org.springframework.boot:spring-boot-starter-jdbc" }
+mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
 
-therapi = {module="com.github.therapi:therapi-runtime-javadoc", version.ref = "therapi"}
-therapi-processor = {module="com.github.therapi:therapi-runtime-javadoc-scribe", version.ref = "therapi"}
+therapi = { module = "com.github.therapi:therapi-runtime-javadoc", version.ref = "therapi" }
+therapi-processor = { module = "com.github.therapi:therapi-runtime-javadoc-scribe", version.ref = "therapi" }
 springdoc-openapi = { module = "org.springdoc:springdoc-openapi-starter-webmvc-ui", version.ref = "springdoc-openapi" }
 swagger-generator-cli = { module = "org.openapitools:openapi-generator-cli", version.ref = "swagger-generator-cli" }
 
@@ -87,8 +88,9 @@ json-schema = { module = "com.github.erosb:everit-json-schema", version.ref = "j
 mapstruct = { module = "org.mapstruct:mapstruct", version.ref = "mapstruct" }
 mapstruct-processor = { module = "org.mapstruct:mapstruct-processor", version.ref = "mapstruct" }
 
-jimmer-spring = { module = "org.babyfish.jimmer:jimmer-spring-boot-starter", version.ref = "jimmer" }
-jimmer-ksp = { module = "org.babyfish.jimmer:jimmer-ksp", version.ref = "jimmer" }
+ktorm = { module = "org.ktorm:ktorm-core", version.ref = "ktorm" }
+ktorm-jackson = { module = "org.ktorm:ktorm-jackson", version.ref = "ktorm" }
+ktorm-postgresql = { module = "org.ktorm:ktorm-support-postgresql", version.ref = "ktorm" }
 postgresql = { module = "org.postgresql:postgresql", version.ref = "postgresql" }
 
 guava = { module = "com.google.guava:guava", version.ref = "guava" }

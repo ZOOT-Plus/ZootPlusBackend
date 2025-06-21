@@ -59,6 +59,7 @@ dependencies {
     implementation(libs.spring.web)
     implementation(libs.spring.webflux)
     implementation(libs.spring.security)
+    implementation(libs.spring.jdbc)
     implementation(libs.spring.data.redis)
     implementation(libs.spring.data.mongodb)
     implementation(libs.spring.validation)
@@ -78,9 +79,10 @@ dependencies {
     // Kotlin-Logging
     implementation(libs.kotlin.logging)
 
-    // Jimmer ORM and JDBC with PG
-    implementation(libs.jimmer.spring)
-    ksp(libs.jimmer.ksp)
+    // Ktorm and JDBC with PG
+    implementation(libs.ktorm)
+    implementation(libs.ktorm.jackson)
+    implementation(libs.ktorm.postgresql)
     runtimeOnly(libs.postgresql)
 
     // Hutool

@@ -16,10 +16,6 @@ spring:
     username: zoot
     password: 1234
 
-jimmer:
-  show-sql: true
-  pretty-sql: true
-
 maa-copilot:
   backup:
     dir: /home/dove/copilotBak

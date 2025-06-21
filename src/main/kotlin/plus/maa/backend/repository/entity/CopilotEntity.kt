@@ -1,74 +1,98 @@
 package plus.maa.backend.repository.entity
 
-import org.babyfish.jimmer.sql.Entity
-import org.babyfish.jimmer.sql.GeneratedValue
-import org.babyfish.jimmer.sql.GenerationType
-import org.babyfish.jimmer.sql.Id
-import org.babyfish.jimmer.sql.OneToMany
-import org.babyfish.jimmer.sql.Table
+import org.ktorm.database.Database
+import org.ktorm.entity.Entity
+import org.ktorm.entity.sequenceOf
+import org.ktorm.schema.Table
+import org.ktorm.schema.boolean
+import org.ktorm.schema.datetime
+import org.ktorm.schema.double
+import org.ktorm.schema.enum
+import org.ktorm.schema.int
+import org.ktorm.schema.long
+import org.ktorm.schema.text
+import org.ktorm.schema.varchar
 import plus.maa.backend.service.model.CommentStatus
 import plus.maa.backend.service.model.CopilotSetStatus
 import java.time.LocalDateTime
 
-@Entity
-@Table(name = "copilot")
-interface CopilotEntity {
+interface CopilotEntity : Entity<CopilotEntity> {
     // 迁移时不标记为主键防止生成
     // 自增数字ID
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    val copilotId: Long
+    var copilotId: Long
 
     // 关卡名
-    val stageName: String
+    var stageName: String
 
     // 上传者id
-    val uploaderId: String
+    var uploaderId: String
 
     // 查看次数
-    val views: Long
+    var views: Long
 
     // 评级
-    val ratingLevel: Int
+    var ratingLevel: Int
 
     // 评级比率 十分之一代表半星
-    val ratingRatio: Double
-    val likeCount: Long
-    val dislikeCount: Long
+    var ratingRatio: Double
+    var likeCount: Long
+    var dislikeCount: Long
 
     // 热度
-    val hotScore: Double
-
-    // 指定干员
-//    @Cascade(["copilotId"], ["copilotId"])
-    @OneToMany(mappedBy = "copilot")
-    val opers: List<OperatorEntity>
+    var hotScore: Double
 
     // 文档字段，用于搜索，提取到Copilot类型上
-    val title: String
-    val details: String?
+    var title: String
+    var details: String?
 
     // 首次上传时间
-    val firstUploadTime: LocalDateTime
+    var firstUploadTime: LocalDateTime
 
     // 更新时间
-    val uploadTime: LocalDateTime
+    var uploadTime: LocalDateTime
 
     // 原始数据
-    val content: String
+    var content: String
 
     /**
      * 作业状态，后端默认设置为公开以兼容历史逻辑
      * [plus.maa.backend.service.model.CopilotSetStatus]
      */
-    val status: CopilotSetStatus
+    var status: CopilotSetStatus
 
     /**
      * 评论状态
      */
-    val commentStatus: CommentStatus
+    var commentStatus: CommentStatus
 
-    val delete: Boolean
-    val deleteTime: LocalDateTime?
-    val notification: Boolean
+    var delete: Boolean
+    var deleteTime: LocalDateTime?
+    var notification: Boolean
+
+    companion object : Entity.Factory<CopilotEntity>()
+
 }
+
+object Copilots : Table<CopilotEntity>("copilot") {
+    val copilotId = long("copilot_id").primaryKey().bindTo { it.copilotId }
+    val stageName = varchar("stage_name").bindTo { it.stageName }
+    val uploaderId = varchar("uploader_id").bindTo { it.uploaderId }
+    val views = long("views").bindTo { it.views }
+    val ratingLevel = int("rating_level").bindTo { it.ratingLevel }
+    val ratingRatio = double("rating_ratio").bindTo { it.ratingRatio }
+    val likeCount = long("like_count").bindTo { it.likeCount }
+    val dislikeCount = long("dislike_count").bindTo { it.dislikeCount }
+    val hotScore = double("hot_score").bindTo { it.hotScore }
+    val title = varchar("title").bindTo { it.title }
+    val details = text("details").bindTo { it.details }
+    val firstUploadTime = datetime("first_upload_time").bindTo { it.firstUploadTime }
+    val uploadTime = datetime("upload_time").bindTo { it.uploadTime }
+    val content = text("content").bindTo { it.content }
+    val status = enum<CopilotSetStatus>("status").bindTo { it.status }
+    val commentStatus = enum<CommentStatus>("comment_status").bindTo { it.commentStatus }
+    val delete = boolean("delete").bindTo { it.delete }
+    val deleteTime = datetime("delete_time").bindTo { it.deleteTime }
+    val notification = boolean("notification").bindTo { it.notification }
+}
+
+val Database.copilots get() = sequenceOf(Copilots)

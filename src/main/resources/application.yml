@@ -34,10 +34,6 @@ server:
   compression:
     enabled: true
 
-jimmer:
-  language: kotlin
-  dialect: org.babyfish.jimmer.sql.dialect.PostgresDialect
-
 logging:
   file:
     name: ./logs/latest.log
