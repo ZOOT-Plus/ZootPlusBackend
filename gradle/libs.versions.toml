@@ -1,0 +1,108 @@
+[versions]
+# Kotlin & JVM ecosystem
+kotlin = "2.1.21"
+kotlin-ksp = "2.1.21-2.0.1"
+kotlinx-coroutines = "1.10.2"
+kotlin-logging = "7.0.7"
+mockk = "1.14.2"
+
+# Spring ecosystem
+spring-boot = "3.5.3"
+spring-deps = "1.1.7"
+springdoc-openapi = "2.8.8"
+
+# Gradle plugins
+openapi = "1.9.0"
+swagger-generator = "2.19.2"
+git-properties = "2.5.0"
+ktlint-plugin = "12.3.0"
+
+# Database & persistence
+ktorm = "4.1.1"
+postgresql = "42.7.6"
+
+# JSON & data processing
+json-schema = "1.14.6"
+mapstruct = "1.6.3"
+
+# Utility libraries
+hutool = "5.8.38"
+jgit = "7.2.1.202505142326-r"
+javax-mail = "1.6.2"
+ik-analyzer = "8.5.0"
+freemarker = "2.3.34"
+guava = "33.4.8-jre"
+caffeine = "3.2.0"
+pinyin4j = "2.5.0"
+
+# API & documentation
+therapi = "0.15.0"
+swagger-generator-cli = "7.13.0"
+
+[plugins]
+# Kotlin plugins
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+kotlin-kapt = { id = "org.jetbrains.kotlin.kapt", version.ref = "kotlin" }
+kotlin-ksp = { id = "com.google.devtools.ksp", version.ref = "kotlin-ksp" }
+kotlin-spring = { id = "org.jetbrains.kotlin.plugin.spring", version.ref = "kotlin" }
+
+# Spring plugins
+spring = { id = "org.springframework.boot", version.ref = "spring-boot" }
+spring-deps = { id = "io.spring.dependency-management", version.ref = "spring-deps" }
+
+# Documentation & API plugins
+openapi = { id = "org.springdoc.openapi-gradle-plugin", version.ref = "openapi" }
+swagger-generator = { id = "org.hidetake.swagger.generator", version.ref = "swagger-generator" }
+
+# Code quality & build plugins
+git-properties = { id = "com.gorylenko.gradle-git-properties", version.ref = "git-properties" }
+ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlint-plugin" }
+
+[libraries]
+kotlinx-coroutines = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
+kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinx-coroutines" }
+kotlinx-coroutines-reactor = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-reactor", version.ref = "kotlinx-coroutines" }
+kotlin-logging = { module = "io.github.oshai:kotlin-logging-jvm", version.ref = "kotlin-logging" }
+
+spring-web = { module = "org.springframework.boot:spring-boot-starter-web" }
+spring-webflux = { module = "org.springframework.boot:spring-boot-starter-webflux" }
+spring-security = { module = "org.springframework.boot:spring-boot-starter-security" }
+spring-data-redis = { module = "org.springframework.boot:spring-boot-starter-data-redis" }
+spring-data-mongodb = { module = "org.springframework.boot:spring-boot-starter-data-mongodb" }
+spring-validation = { module = "org.springframework.boot:spring-boot-starter-validation" }
+spring-cache = { module = "org.springframework.boot:spring-boot-starter-cache" }
+spring-processor = { module = "org.springframework.boot:spring-boot-configuration-processor" }
+spring-test = { module = "org.springframework.boot:spring-boot-starter-test" }
+spring-jdbc = { module = "org.springframework.boot:spring-boot-starter-jdbc" }
+mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
+
+therapi = { module = "com.github.therapi:therapi-runtime-javadoc", version.ref = "therapi" }
+therapi-processor = { module = "com.github.therapi:therapi-runtime-javadoc-scribe", version.ref = "therapi" }
+springdoc-openapi = { module = "org.springdoc:springdoc-openapi-starter-webmvc-ui", version.ref = "springdoc-openapi" }
+swagger-generator-cli = { module = "org.openapitools:openapi-generator-cli", version.ref = "swagger-generator-cli" }
+
+jackson-module-kotlin = { module = "com.fasterxml.jackson.module:jackson-module-kotlin" }
+jackson-datatype-jsr310 = { module = "com.fasterxml.jackson.datatype:jackson-datatype-jsr310" }
+json-schema = { module = "com.github.erosb:everit-json-schema", version.ref = "json-schema" }
+
+mapstruct = { module = "org.mapstruct:mapstruct", version.ref = "mapstruct" }
+mapstruct-processor = { module = "org.mapstruct:mapstruct-processor", version.ref = "mapstruct" }
+
+ktorm = { module = "org.ktorm:ktorm-core", version.ref = "ktorm" }
+ktorm-jackson = { module = "org.ktorm:ktorm-jackson", version.ref = "ktorm" }
+ktorm-postgresql = { module = "org.ktorm:ktorm-support-postgresql", version.ref = "ktorm" }
+postgresql = { module = "org.postgresql:postgresql", version.ref = "postgresql" }
+
+guava = { module = "com.google.guava:guava", version.ref = "guava" }
+caffeine = { module = "com.github.ben-manes.caffeine:caffeine", version.ref = "caffeine" }
+hutool-extra = { module = "cn.hutool:hutool-extra", version.ref = "hutool" }
+hutool-jwt = { module = "cn.hutool:hutool-jwt", version.ref = "hutool" }
+hutool-dfa = { module = "cn.hutool:hutool-dfa", version.ref = "hutool" }
+javax-mail = { module = "com.sun.mail:javax.mail", version.ref = "javax-mail" }
+pinyin4j = { module = "com.belerweb:pinyin4j", version.ref = "pinyin4j" }
+
+ik-analyzer = { module = "com.github.magese:ik-analyzer", version.ref = "ik-analyzer" }
+
+jgit = { module = "org.eclipse.jgit:org.eclipse.jgit", version.ref = "jgit" }
+jgit-ssh-apache-agent = { module = "org.eclipse.jgit:org.eclipse.jgit.ssh.apache.agent", version.ref = "jgit" }
+freemarker = { module = "org.freemarker:freemarker", version.ref = "freemarker" }

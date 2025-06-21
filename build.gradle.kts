@@ -4,17 +4,18 @@ import org.jlleitschuh.gradle.ktlint.reporter.ReporterType
 
 plugins {
     java
-    id("org.springframework.boot") version "3.4.6"
-    id("io.spring.dependency-management") version "1.1.7"
-    id("org.springdoc.openapi-gradle-plugin") version "1.9.0"
-    id("org.hidetake.swagger.generator") version "2.19.2"
-    id("com.gorylenko.gradle-git-properties") version "2.5.0"
 
-    kotlin("jvm") version "2.1.21"
-    kotlin("plugin.spring") version "2.1.21"
-    kotlin("kapt") version "2.1.21"
+    alias(libs.plugins.kotlin.ksp)
+    alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.kotlin.kapt)
+    alias(libs.plugins.kotlin.spring)
 
-    id("org.jlleitschuh.gradle.ktlint") version "12.3.0"
+    alias(libs.plugins.spring)
+    alias(libs.plugins.spring.deps)
+    alias(libs.plugins.openapi)
+    alias(libs.plugins.swagger.generator)
+    alias(libs.plugins.git.properties)
+    alias(libs.plugins.ktlint)
 }
 
 group = "plus.zoot"
@@ -27,6 +28,9 @@ java {
 }
 
 kotlin {
+    sourceSets.main {
+        kotlin.srcDir("build/generated/ksp/main/kotlin")
+    }
     compilerOptions {
         freeCompilerArgs.add("-Xjsr305=strict")
         jvmTarget = JvmTarget.JVM_21
@@ -43,65 +47,73 @@ repositories {
     maven(url = "https://maven.aliyun.com/repository/spring-plugin")
     maven(url = "https://maven.aliyun.com/repository/gradle-plugin")
     mavenCentral()
+    maven(url = "https://central.sonatype.com/repository/maven-snapshots/")
 }
 
 dependencies {
-    val hutoolVersion = "5.8.38"
-    val mapstructVersion = "1.6.3"
+    kapt(libs.spring.processor)
 
-    kapt("org.springframework.boot:spring-boot-configuration-processor")
+    testImplementation(libs.spring.test)
+    testImplementation(libs.mockk)
 
-    testImplementation("io.mockk:mockk:1.14.2")
-    testImplementation("org.springframework.boot:spring-boot-starter-test")
+    implementation(libs.spring.web)
+    implementation(libs.spring.webflux)
+    implementation(libs.spring.security)
+    implementation(libs.spring.jdbc)
+    implementation(libs.spring.data.redis)
+    implementation(libs.spring.data.mongodb)
+    implementation(libs.spring.validation)
+    implementation(libs.spring.cache)
 
-    implementation("org.springframework.boot:spring-boot-starter-web")
-    implementation("org.springframework.boot:spring-boot-starter-webflux")
-    implementation("org.springframework.boot:spring-boot-starter-security")
-    implementation("org.springframework.boot:spring-boot-starter-data-redis")
-    implementation("org.springframework.boot:spring-boot-starter-data-mongodb")
-    implementation("org.springframework.boot:spring-boot-starter-validation")
-    implementation("org.springframework.boot:spring-boot-starter-cache")
+    implementation(libs.springdoc.openapi)
+    implementation(libs.therapi)
+    kapt(libs.therapi.processor)
 
-    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.8")
-    implementation("com.github.therapi:therapi-runtime-javadoc:0.15.0")
-    kapt("com.github.therapi:therapi-runtime-javadoc-scribe:0.15.0")
+    // Kotlin
+    implementation(kotlin("reflect"))
+    implementation(libs.jackson.module.kotlin)
+    implementation(libs.kotlinx.coroutines)
+    implementation(libs.kotlinx.coroutines.test)
+    implementation(libs.kotlinx.coroutines.reactor)
 
-    // kotlin
-    implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
-    implementation("org.jetbrains.kotlin:kotlin-reflect")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor")
-    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test")
+    // Kotlin-Logging
+    implementation(libs.kotlin.logging)
 
-    // kotlin-logging
-    implementation("io.github.oshai:kotlin-logging-jvm:7.0.7")
+    // Ktorm and JDBC with PG
+    implementation(libs.ktorm)
+    implementation(libs.ktorm.jackson)
+    implementation(libs.ktorm.postgresql)
+    runtimeOnly(libs.postgresql)
 
-    // hutool 的邮箱工具类依赖
-    implementation("com.sun.mail:javax.mail:1.6.2")
-    implementation("cn.hutool:hutool-extra:$hutoolVersion")
-    implementation("cn.hutool:hutool-jwt:$hutoolVersion")
-    implementation("cn.hutool:hutool-dfa:$hutoolVersion")
+    // Hutool
+    implementation(libs.javax.mail)
+    implementation(libs.hutool.extra)
+    implementation(libs.hutool.jwt)
+    implementation(libs.hutool.dfa)
 
-    // mapstruct
-    implementation("org.mapstruct:mapstruct:$mapstructVersion")
-    kapt("org.mapstruct:mapstruct-processor:$mapstructVersion")
+    // MapStruct
+    implementation(libs.mapstruct)
+    kapt(libs.mapstruct.processor)
 
-    implementation("com.github.magese:ik-analyzer:8.5.0")
+    implementation(libs.ik.analyzer)
 
-    implementation("org.eclipse.jgit:org.eclipse.jgit:7.1.0.202411261347-r")
-    implementation("org.eclipse.jgit:org.eclipse.jgit.ssh.apache.agent:7.1.0.202411261347-r")
-    implementation("org.freemarker:freemarker:2.3.34")
-    implementation("com.github.ben-manes.caffeine:caffeine:3.2.0")
-    implementation("com.github.erosb:everit-json-schema:1.14.6") {
+    // Git
+    implementation(libs.jgit)
+    implementation(libs.jgit.ssh.apache.agent)
+    implementation(libs.freemarker)
+
+    // Utilities
+    implementation(libs.caffeine)
+    implementation(libs.json.schema) {
         exclude("commons-logging")
     }
-    implementation("com.google.guava:guava:33.4.8-jre")
+    implementation(libs.guava)
 
-    implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310")
+    implementation(libs.jackson.datatype.jsr310)
 
-    swaggerCodegen("org.openapitools:openapi-generator-cli:7.13.0")
+    swaggerCodegen(libs.swagger.generator.cli)
 
-    implementation("com.belerweb:pinyin4j:2.5.0")
+    implementation(libs.pinyin4j)
 }
 
 val swaggerOutputDir = layout.buildDirectory.dir("docs")

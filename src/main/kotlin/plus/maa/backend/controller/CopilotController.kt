@@ -73,7 +73,8 @@ class CopilotController(
     fun queriesCopilot(@ParameterObject parsed: @Valid CopilotQueriesRequest): MaaResult<CopilotPageInfo> {
         // 三秒防抖，缓解前端重复请求问题
         response.setHeader(HttpHeaders.CACHE_CONTROL, "private, max-age=3, must-revalidate")
-        return success(copilotService.queriesCopilot(helper.obtainUserId(), parsed))
+//        return success(copilotService.queriesCopilot(helper.obtainUserId(), parsed))
+        return success(copilotService.queriesCopilotPG(helper.obtainUserId(), parsed))
     }
 
     @Operation(summary = "更新作业")
