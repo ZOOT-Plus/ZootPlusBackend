@@ -4,9 +4,25 @@ import com.fasterxml.jackson.core.JsonProcessingException
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.ktorm.database.Database
+import org.ktorm.dsl.and
+import org.ktorm.dsl.asc
+import org.ktorm.dsl.desc
+import org.ktorm.dsl.eq
+import org.ktorm.dsl.from
 import org.ktorm.dsl.inList
+import org.ktorm.dsl.like
+import org.ktorm.dsl.notInList
+import org.ktorm.dsl.select
+import org.ktorm.dsl.where
+import org.ktorm.entity.drop
 import org.ktorm.entity.filter
 import org.ktorm.entity.forEach
+import org.ktorm.entity.sortedBy
+import org.ktorm.entity.take
+import org.ktorm.entity.toList
+import org.ktorm.expression.ArgumentExpression
+import org.ktorm.schema.BooleanSqlType
+import org.ktorm.schema.ColumnDeclaring
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Pageable
 import org.springframework.data.domain.Sort
@@ -39,8 +55,10 @@ import plus.maa.backend.repository.entity.Copilot
 import plus.maa.backend.repository.entity.Copilot.OperationGroup
 import plus.maa.backend.repository.entity.CopilotEntity
 import plus.maa.backend.repository.entity.MaaUser
+import plus.maa.backend.repository.entity.Operators
 import plus.maa.backend.repository.entity.Rating
 import plus.maa.backend.repository.entity.UserEntity
+import plus.maa.backend.repository.entity.copilots
 import plus.maa.backend.repository.entity.users
 import plus.maa.backend.service.level.ArkLevelService
 import plus.maa.backend.service.model.CommentStatus
@@ -435,7 +453,9 @@ class CopilotService(
         return data
     }
 
-
+    /**
+     * 使用 postgresql 查询作业
+     */
     fun queriesCopilotPG(userId: String?, request: CopilotQueriesRequest): CopilotPageInfo {
         val cacheTimeout = AtomicLong()
         val cacheKey = AtomicReference<String?>()
@@ -532,54 +552,78 @@ class CopilotService(
             }
         }
 
-//        val copilotsQuery = CopilotEntity().select().page(page, limit)
-//            .where {
-//                it.uploaderId in inUserIds
-//                    && it.stageName like stageNameKeyword
-//                    && it.stageName in stageNames
-//                    && it.copilotId in inCopilotIds
-//                    && it.status == requestStatus
-//            }
-//            .orderBy {
-//                val ord = when (request.orderBy ?: "id") {
-//                    "hot" -> it.hotScore
-//                    "id" -> it.copilotId
-//                    "views" -> it.views
-//                    else -> it.copilotId
-//                }
-//                if (request.desc) ord.desc()
-//                else ord.asc()
-//            }
-//
-//        val resultAgg = if (keyword.isNullOrEmpty() &&
-//            request.levelKeyword.isNullOrBlank() &&
-//            request.uploaderId != null &&
-//            request.uploaderId != "me" &&
-//            request.operator.isNullOrBlank() &&
-//            request.copilotIds.isNullOrEmpty()
-//        ) {
-//            val r = copilotsQuery.withTotal().queryList()
-//            val hasNext = r.first > (page * limit)
-//            r to hasNext
-//        } else {
-//            val r = copilotsQuery.queryList()
-//            (0 to r) to (r.size >= limit)
-//        }
-        // TODO 包含或排除干员
-//        request.operator?.removeQuotes()?.split(",")?.filterNot(String::isBlank)?.forEach { oper ->
-//            if (oper.startsWith("~")) {
-//                // 排除查询指定干员
-//                norQueries.add(Criteria.where("opers.name").`is`(oper.substring(1)))
-//            } else {
-//                // 模糊匹配查询指定干员
-//                andQueries.add(Criteria.where("opers.name").`is`(oper))
-//            }
-//        }
+        val ops = request.operator?.removeQuotes()?.split(",")?.filterNot(String::isBlank)
+        var includeOps: List<String>? = null
+        var notIncludeOps: List<String>? = null
+        if (ops != null) {
+            val g = ops.groupBy { it.startsWith('~') }
+            if (!g[true].isNullOrEmpty()) {
+                notIncludeOps = g[true]?.map { it.substring(1) }
+            }
+            if (!g[false].isNullOrEmpty()) {
+                includeOps = g[false]
+            }
+        }
 
+        val copilotsSeq = database.copilots.filter {
+            val conditions = ArrayList<ColumnDeclaring<Boolean>>()
+            conditions += ArgumentExpression(true, BooleanSqlType)
+            if (requestStatus != null) {
+                conditions += it.status eq requestStatus
+            }
+            if (stageNameKeyword != null) {
+                conditions += it.stageName like stageNameKeyword
+            }
+            if (stageNames != null) {
+                conditions += it.stageName inList stageNames
+            }
+            if (inUserIds != null) {
+                conditions += it.uploaderId inList inUserIds
+            }
+            if (inCopilotIds != null) {
+                conditions += it.copilotId inList inCopilotIds
+            }
+            if (includeOps != null) {
+                conditions += it.copilotId inList (database.from(Operators)
+                    .select(Operators.copilotId)
+                    .where { Operators.name inList includeOps })
+            }
+            if (notIncludeOps != null) {
+                conditions += it.copilotId notInList (database.from(Operators)
+                    .select(Operators.copilotId)
+                    .where { Operators.name inList notIncludeOps })
+            }
+            conditions.reduce { a, b -> a and b }
+        }.sortedBy {
+            val ord = when (request.orderBy ?: "id") {
+                "hot" -> it.hotScore
+                "id" -> it.copilotId
+                "views" -> it.views
+                else -> it.copilotId
+            }
+            if (request.desc) ord.desc()
+            else ord.asc()
+        }.drop((page - 1) * limit).take(limit)
 
-        val count = 0
-        val copilots: List<CopilotEntity> = emptyList()
-        val hasNext = false
+        val resultAgg = if (keyword.isNullOrEmpty() &&
+            request.levelKeyword.isNullOrBlank() &&
+            request.uploaderId != null &&
+            request.uploaderId != "me" &&
+            request.operator.isNullOrBlank() &&
+            request.copilotIds.isNullOrEmpty()
+        ) {
+            val r = copilotsSeq.toList()
+            val count = r.count()
+            val hasNext = count > (page * limit)
+            (r to count) to hasNext
+        } else {
+            val r = copilotsSeq.toList()
+            (r to 0) to (r.size >= limit)
+        }
+
+        val count = resultAgg.first.second
+        val copilots: List<CopilotEntity> = resultAgg.first.first
+        val hasNext = resultAgg.second
 
         val userIds = copilots.map { it.uploaderId }
 
@@ -592,7 +636,7 @@ class CopilotService(
             info == null
         }.toList()
         if (remainingUserIds.isNotEmpty()) {
-            val users = database.users.filter { it.userId.inList(remainingUserIds) }
+            val users = database.users.filter { it.userId inList remainingUserIds }
             users.forEach {
                 maaUsers.put(it.userId, it)
                 Cache.setUserCache(it.userId, it)
@@ -737,11 +781,11 @@ class CopilotService(
         ratingRatio = ratingRatio,
         ratingType = (rating?.rating ?: RatingType.NONE).display,
         commentsCount = commentsCount,
-        commentStatus = commentStatus!!,
+        commentStatus = commentStatus,
         content = content,
         like = likeCount,
         dislike = dislikeCount,
-        status = status!!,
+        status = status,
     )
 
     /**
