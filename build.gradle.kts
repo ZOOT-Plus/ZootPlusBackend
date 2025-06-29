@@ -177,6 +177,7 @@ swaggerSources {
 tasks {
     test {
         useJUnitPlatform()
+        jvmArgs = listOf("-XX:+EnableDynamicAgentLoading")
     }
 }
 

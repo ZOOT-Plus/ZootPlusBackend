@@ -23,7 +23,7 @@ create table if not exists "user"
     email           text      not null,
     password        text      not null,
     status          integer   not null,
-    pwd_update_time timestamp not null,
+    pwd_update_time timestamp(3) not null,
     following_count integer   not null,
     fans_count      integer   not null
 );
@@ -53,13 +53,13 @@ create table if not exists copilot
     hot_score         double precision             not null,
     title             text                         not null,
     details           text,
-    first_upload_time timestamp(0),
-    upload_time       timestamp(0),
+    first_upload_time timestamp(3),
+    upload_time       timestamp(3),
     content           text                         not null,
     status            text default 'PUBLIC'::text  not null,
     comment_status    text default 'ENABLED'::text not null,
     delete            boolean,
-    delete_time       timestamp(0),
+    delete_time       timestamp(3),
     notification      boolean
 );
 

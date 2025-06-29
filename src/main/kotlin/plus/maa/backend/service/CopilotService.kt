@@ -2,6 +2,7 @@ package plus.maa.backend.service
 
 import com.fasterxml.jackson.core.JsonProcessingException
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.node.ObjectNode
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.ktorm.database.Database
 import org.ktorm.dsl.and
@@ -98,6 +99,7 @@ class CopilotService(
     private val sensitiveWordService: SensitiveWordService,
     private val segmentService: SegmentService,
     private val userFollowingRepository: UserFollowingRepository,
+    private val objectMapper: ObjectMapper,
 ) {
     private val log = KotlinLogging.logger { }
 
@@ -410,11 +412,11 @@ class CopilotService(
         // 反正目前首页和搜索不会直接展示当前用户有没有点赞，干脆直接不查，要用户点进作业才显示自己是否点赞
         val infos = copilots.map { copilot ->
             copilot.content = mapOf(
-                "stageName" to copilot.stageName,
+//                "stageName" to copilot.stageName,
                 "doc" to copilot.doc,
                 "opers" to copilot.opers,
                 "groups" to copilot.groups,
-                "minimumRequired" to copilot.minimumRequired,
+//                "minimumRequired" to copilot.minimumRequired,
                 "difficulty" to copilot.difficulty,
             ).run(mapper::writeValueAsString)
             copilot.format(
@@ -568,6 +570,7 @@ class CopilotService(
         val copilotsSeq = database.copilots.filter {
             val conditions = ArrayList<ColumnDeclaring<Boolean>>()
             conditions += ArgumentExpression(true, BooleanSqlType)
+            conditions += it.delete eq false
             if (requestStatus != null) {
                 conditions += it.status eq requestStatus
             }
@@ -666,6 +669,12 @@ class CopilotService(
         // 新版评分系统
         // 反正目前首页和搜索不会直接展示当前用户有没有点赞，干脆直接不查，要用户点进作业才显示自己是否点赞
         val infos = copilots.map { copilot ->
+            val contentObj = objectMapper.readTree(copilot.content) as ObjectNode
+            contentObj.remove("actions")
+            contentObj.remove("minimum_required")
+            contentObj.remove("stage_name")
+            copilot.content = contentObj.toString()
+
             copilot.format(
                 null,
                 maaUsers.getOrDefault(copilot.uploaderId, UserEntity.UNKNOWN).userName,

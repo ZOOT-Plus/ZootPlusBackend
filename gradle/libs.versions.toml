@@ -4,7 +4,7 @@ kotlin = "2.1.21"
 kotlin-ksp = "2.1.21-2.0.1"
 kotlinx-coroutines = "1.10.2"
 kotlin-logging = "7.0.7"
-mockk = "1.14.2"
+mockk = "1.14.4"
 
 # Spring ecosystem
 spring-boot = "3.5.3"
