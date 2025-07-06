@@ -244,12 +244,6 @@ class RedisCache(
         }
     }
 
-    var cacheLevelCommit: String?
-        get() = getCache("level:commit", String::class.java)
-        set(commit) {
-            setData("level:commit", commit)
-        }
-
     @JvmOverloads
     fun removeCache(key: String, notUseUnlink: Boolean = false) {
         removeCache(listOf(key), notUseUnlink)

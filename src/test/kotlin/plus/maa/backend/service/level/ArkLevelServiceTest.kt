@@ -15,20 +15,6 @@ class ArkLevelServiceTest(
     @Autowired
     private val service: ArkLevelService,
 ) {
-    /*** your own proxy settings ***/
-//    init {
-//        val client = WebClient.builder()
-//            .clientConnector(
-//                ReactorClientHttpConnector(
-//                    HttpClient.create().proxy {
-//                        it.type(ProxyProvider.Proxy.HTTP).host("127.0.0.1").port(10809)
-//                    },
-//                ),
-//            )
-//            .uriBuilderFactory(DefaultUriBuilderFactory().apply { encodingMode = DefaultUriBuilderFactory.EncodingMode.NONE })
-//            .build()
-//        ReflectionTestUtils.setField(service, "webClient", client)
-//    }
 
     @Order(1)
     @Test

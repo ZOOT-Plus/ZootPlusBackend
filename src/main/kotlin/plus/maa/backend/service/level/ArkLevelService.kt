@@ -7,14 +7,18 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.withContext
 import org.springframework.cache.annotation.Cacheable
 import org.springframework.data.domain.Pageable
+import org.springframework.http.client.reactive.ReactorClientHttpConnector
 import org.springframework.stereotype.Service
 import org.springframework.web.reactive.function.client.WebClient
 import org.springframework.web.util.DefaultUriBuilderFactory
 import plus.maa.backend.common.extensions.awaitString
 import plus.maa.backend.common.extensions.lazySuspend
+import plus.maa.backend.common.extensions.meetAll
+import plus.maa.backend.common.extensions.traceRun
 import plus.maa.backend.common.utils.converter.ArkLevelConverter
 import plus.maa.backend.config.external.MaaCopilotProperties
 import plus.maa.backend.controller.response.copilot.ArkLevelInfo
@@ -26,6 +30,7 @@ import plus.maa.backend.repository.entity.gamedata.ArkTilePos
 import plus.maa.backend.repository.entity.gamedata.MaaArkStage
 import plus.maa.backend.repository.entity.github.GithubCommit
 import plus.maa.backend.repository.entity.github.GithubTree
+import reactor.netty.http.client.HttpClient
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.time.LocalDateTime
@@ -48,9 +53,10 @@ class ArkLevelService(
 ) {
     private val log = KotlinLogging.logger { }
     private val github = properties.github
-    private val webClient = webClientBuilder
-        .uriBuilderFactory(DefaultUriBuilderFactory().apply { encodingMode = DefaultUriBuilderFactory.EncodingMode.NONE })
-        .build()
+    private val webClient =
+        webClientBuilder.uriBuilderFactory(DefaultUriBuilderFactory().apply { encodingMode = DefaultUriBuilderFactory.EncodingMode.NONE })
+            .clientConnector(ReactorClientHttpConnector(HttpClient.create().proxyWithSystemProperties()))
+            .build()
     private val fetchDataHolder = lazySuspend { ArkGameDataHolder.fetch(webClient) }
     private val fetchLevelParser = lazySuspend { ArkLevelParserDelegate(fetchDataHolder()) }
 
@@ -69,144 +75,125 @@ class ArkLevelService(
     /**
      * 地图数据更新任务
      */
-    suspend fun syncLevelData() {
-        val tag = "[LEVEL]"
+    suspend fun syncLevelData() = log.traceRun("LEVEL") {
         try {
-            log.info { "${tag}开始同步地图数据" }
+            logI { "开始同步地图数据" }
             // 获取地图文件夹最新的 commit, 与缓存的 commit 比较，如果相同则不更新
-            val commit = getGithubCommits().getOrNull(0)
+            val commit = getGithubCommits().firstOrNull()
             checkNotNull(commit) { "获取地图数据最新 commit 失败" }
-            if (redisCache.cacheLevelCommit == commit.sha) {
-                log.info { "${tag}地图数据已是最新" }
-                return
+
+            val stale = workIfStale("level:commit", commit.sha) {
+                val trees = fetchTilePosGithubTreesToUpdate(commit)
+                logI { "已发现 ${trees.size} 份地图数据" }
+
+                // 根据 sha 筛选无需更新的地图
+                val shaSet = withContext(Dispatchers.IO) { arkLevelRepo.findAllShaBy() }.map { it.sha }.toSet()
+                val filtered = trees.filter { !shaSet.contains(it.sha) }
+
+                val parser = fetchLevelParser()
+                downloadAndSaveLevelDatum(filtered, parser)
             }
-
-            val trees = fetchTilePosGithubTreesToUpdate(commit, github.tilePosPath)
-            log.info { "${tag}已发现 ${trees.size} 份地图数据" }
-
-            // 根据 sha 筛选无需更新的地图
-            val shaList = withContext(Dispatchers.IO) { arkLevelRepo.findAllShaBy() }.map { it.sha }
-            val filtered = trees.filter { !shaList.contains(it.sha) }
-
-            val parser = fetchLevelParser()
-            val allSuccess = downloadAndSaveLevelDatum(filtered, parser)
-            if (allSuccess) redisCache.cacheLevelCommit = commit.sha
+            if (!stale) logI { "地图数据已是最新" }
         } catch (e: Exception) {
-            log.error(e) { "${tag}同步地图数据失败" }
+            logE(e) { "同步地图数据失败" }
         }
     }
 
-    private suspend fun fetchTilePosGithubTreesToUpdate(commit: GithubCommit, path: String): List<GithubTree> {
+    private suspend fun fetchTilePosGithubTreesToUpdate(commit: GithubCommit): List<GithubTree> {
+        val segments = github.tilePosPath.split("/").filter(String::isNotEmpty)
         var folder = getGithubTree(commit.sha)
-        val pathSegments = path.split("/").filter(String::isNotEmpty)
-        for (seg in pathSegments) {
-            val targetTree = folder.tree.firstOrNull { it.path == seg && it.type == "tree" }
-                ?: throw Exception("[LEVEL]地图数据获取失败, 未找到文件夹 $path")
+        for (s in segments) {
+            val targetTree = folder.tree.firstOrNull { it.path == s && it.type == "tree" }
+                ?: throw Exception("地图数据获取失败, 未找到文件夹 ${github.tilePosPath}")
             folder = getGithubTree(targetTree.sha)
         }
         // 根据后缀筛选地图文件列表,排除 overview 文件、肉鸽、训练关卡和 Guide? 不知道是啥
         return folder.tree.filter {
-            it.type == "blob" &&
-                it.path.endsWith(".json") &&
-                it.path != "overview.json" &&
-                !it.path.contains("roguelike") &&
-                !it.path.startsWith("tr_") &&
-                !it.path.startsWith("guide_")
+            meetAll(
+                it.type == "blob",
+                it.path.endsWith(".json"),
+                it.path != "overview.json",
+                !it.path.contains("roguelike"),
+                !it.path.startsWith("tr_"),
+                !it.path.startsWith("guide_"),
+            )
         }
     }
 
-    private suspend fun downloadAndSaveLevelDatum(trees: List<GithubTree>, parser: ArkLevelParserDelegate): Boolean {
+    private suspend fun downloadAndSaveLevelDatum(trees: List<GithubTree>, parser: ArkLevelParserDelegate) = log.traceRun("LEVEL") {
         val total = trees.size
+        logI { " $total 份地图数据需要更新" }
+
         val success = AtomicInteger(0)
         val fail = AtomicInteger(0)
         val pass = AtomicInteger(0)
-        val startTime = System.currentTimeMillis()
-
         fun current() = success.get() + fail.get() + pass.get()
-        fun duration() = (System.currentTimeMillis() - startTime) / 1000
-        fun formatLog(path: String, result: String) = "[LEVEL][${current()}/$total][${duration()}s] 更新 $path $result"
 
+        val startTime = System.currentTimeMillis()
+        fun duration() = (System.currentTimeMillis() - startTime) / 1000
+        fun entryInfo(path: String, result: String) = "[${current()}/$total][${duration()}s] 更新 $path $result"
+
+        val semaphore = Semaphore(20)
         suspend fun downloadAndSave(tree: GithubTree) = try {
+            semaphore.acquire()
             val fileName = URLEncoder.encode(tree.path, StandardCharsets.UTF_8)
             val url = "https://raw.githubusercontent.com/${github.repoAndBranch}/${github.tilePosPath}/$fileName"
             val tilePos = getTextAsEntity<ArkTilePos>(url)
             val level = parser.parseLevel(tilePos, tree.sha)
-            checkNotNull(level) { "地图数据解析失败: ${tree.path}" }
+            checkNotNull(level) { "地图数据解析失败" }
             if (level === ArkLevel.EMPTY) {
                 pass.incrementAndGet()
-                log.info { formatLog(tree.path, "跳过") }
+                logI { entryInfo(tree.path, "未知类型，跳过") }
             } else {
                 withContext(Dispatchers.IO) { arkLevelRepo.save(level) }
                 success.incrementAndGet()
-                log.info { formatLog(tree.path, "成功") }
+                logI { entryInfo(tree.path, "成功") }
             }
         } catch (e: Exception) {
             fail.incrementAndGet()
-            log.error(e) { formatLog(tree.path, "失败") }
+            logE(e) { entryInfo(tree.path, "失败") }
+        } finally {
+            semaphore.release()
         }
 
-        log.info { "[LEVEL] $total 份地图数据需要更新" }
-        coroutineScope {
-            // 每次最多同时请求 200 个
-            trees.chunked(200).forEach { chunk ->
-                chunk.map { async { downloadAndSave(it) } }.awaitAll()
-            }
-        }
-        log.info { "[LEVEL]地图数据更新完成, 成功:${success.get()}, 失败:${fail.get()}, 跳过:${pass.get()} 总用时 ${duration()}s" }
-        return success.get() + pass.get() == total
+        coroutineScope { trees.map { async { downloadAndSave(it) } }.awaitAll() }
+        logI { "地图数据更新完成, 成功:${success.get()}, 失败:${fail.get()}, 跳过:${pass.get()}, 总用时 ${duration()}s" }
     }
 
     /**
      * 更新活动地图开放状态
      */
-    suspend fun updateActivitiesOpenStatus() {
-        val cacheKey = "level:stages:sha"
+    suspend fun updateActivitiesOpenStatus() = log.traceRun("ACTIVITIES-OPEN-STATUS") {
         try {
-            log.info { "[ACTIVITIES-OPEN-STATUS]准备更新活动地图开放状态" }
-            val content = getGithubContent("resource")
-                .firstOrNull { it.isFile && "stages.json" == it.name }
+            logI { "准备更新" }
+            val content = getGithubContent("resource").firstOrNull { it.isFile && "stages.json" == it.name }
+            val downloadUrl = checkNotNull(content?.downloadUrl) { "数据不存在" }
 
-            if (content?.downloadUrl == null) {
-                log.info { "[ACTIVITIES-OPEN-STATUS]活动地图开放状态数据不存在" }
-                return
-            }
+            val stale = workIfStale("level:stages:sha", content.sha) {
+                logI { "开始下载数据" }
+                val openStages = getTextAsEntity<List<MaaArkStage>>(downloadUrl)
+                val openStageKeys = openStages.map { ArkLevelUtil.getKeyInfoById(it.stageId) }.toSet()
+                val now = LocalDateTime.now()
 
-            val lastSha = redisCache.getCache(cacheKey, String::class.java)
-            if (lastSha == content.sha) {
-                log.info { "[ACTIVITIES-OPEN-STATUS]活动地图开放状态已是最新" }
-                return
-            }
-            val openStageKeyInfos = getTextAsEntity<List<MaaArkStage>>(content.downloadUrl)
-                .map { ArkLevelUtil.getKeyInfoById(it.stageId) }
-                .toSet()
-
-            log.info { "[ACTIVITIES-OPEN-STATUS]开始更新活动地图开放状态" }
-
-            val now = LocalDateTime.now()
-            updateLevelsOfTypeInBatch(ArkLevelType.ACTIVITIES) { arkLevel: ArkLevel ->
-                val currentOpen = ArkLevelUtil.getKeyInfoById(arkLevel.stageId) in openStageKeyInfos
-                if (currentOpen) {
-                    arkLevel.closeTime = null
-                } else if (arkLevel.isOpen == true) {
-                    // 确认已经被关闭: 曾经开放，现在不开放
-                    arkLevel.closeTime = arkLevel.closeTime ?: now
+                logI { "下载完成，开始更新" }
+                updateLevelsOfTypeInBatch(ArkLevelType.ACTIVITIES) { level ->
+                    level.isOpen = ArkLevelUtil.getKeyInfoById(level.stageId) in openStageKeys
+                    level.closeTime = if (level.isOpen ?: false) null else level.closeTime ?: now
                 }
-                arkLevel.isOpen = currentOpen
+                logI { "更新完成" }
             }
-
-            redisCache.setData(cacheKey, content.sha)
-            log.info { "[ACTIVITIES-OPEN-STATUS]活动地图开放状态更新完成" }
+            if (!stale) logI { "已是最新" }
         } catch (e: Exception) {
-            log.error(e) { "[ACTIVITIES-OPEN-STATUS]活动地图开放状态更新失败" }
+            log.error(e) { "[ACTIVITIES-OPEN-STATUS] 更新失败" }
         }
     }
 
     /**
      * 更新危机合约开放状态
      */
-    suspend fun updateCrisisV2OpenStatus() {
-        log.info { "[CRISIS-V2-OPEN-STATUS]准备更新危机合约开放状态" }
-        val holder = fetchDataHolder().updateCrisisV2Info()
+    suspend fun updateCrisisV2OpenStatus() = log.traceRun("CRISIS-V2-OPEN-STATUS") {
+        logI { "准备更新开放状态" }
+        val holder = ArkGameDataHolder.updateCrisisV2Info(fetchDataHolder(), webClient)
         val nowTime = LocalDateTime.now()
 
         updateLevelsOfTypeInBatch(ArkLevelType.RUNE) { level ->
@@ -214,7 +201,7 @@ class ArkLevelService(
             level.closeTime = LocalDateTime.ofEpochSecond(info.endTs, 0, ZoneOffset.UTC)
             level.isOpen = level.closeTime?.isAfter(nowTime)
         }
-        log.info { "[CRISIS-V2-OPEN-STATUS]危机合约开放状态更新完毕" }
+        logI { "开放状态更新完毕" }
     }
 
     suspend fun updateLevelsOfTypeInBatch(catOne: ArkLevelType, batchSize: Int = 1000, block: (ArkLevel) -> Unit) {
@@ -232,12 +219,20 @@ class ArkLevelService(
     private suspend fun getGithubContent(path: String) = withContext(Dispatchers.IO) { githubRepo.getContents(github.token, path) }
 
     /**
-     * Fetch a resource as text, parse as json and convert it to entity.
+     * Fetch a resource as text, parse as JSON and convert it to entity.
      *
      * GithubContents returns responses of `text/html` normally
      */
     private suspend inline fun <reified T> getTextAsEntity(uri: String): T {
         val text = webClient.get().uri(uri).retrieve().awaitString()
         return mapper.readValue<T>(text)
+    }
+
+    private suspend fun <T> workIfStale(key: String, requiredValue: String, block: suspend () -> T): Boolean {
+        val c = redisCache.getCache(key, String::class.java)
+        if (c == requiredValue) return false
+        block.invoke()
+        redisCache.setData(key, requiredValue)
+        return true
     }
 }
