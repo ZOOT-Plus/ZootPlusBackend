@@ -109,6 +109,7 @@ class SecurityConfig(
                 "/comments/query",
                 "/file/upload",
                 "/copilot/ban",
+                "/webhook/**"
             )
 
         // 添加需要权限1才能访问的接口

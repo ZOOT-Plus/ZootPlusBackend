@@ -58,6 +58,15 @@ class SpringDocConfig(
                         description(s)
                     },
                 )
+                addSecuritySchemes(
+                    SECURITY_SCHEME_API_KEY,
+                    SecurityScheme().apply {
+                        type(SecurityScheme.Type.APIKEY)
+                        name("X-API-Key")
+                        `in`(SecurityScheme.In.HEADER)
+                        description("X-API-Key: your API Key")
+                    }
+                )
             },
         )
     }
@@ -67,5 +76,6 @@ class SpringDocConfig(
 
     companion object {
         const val SECURITY_SCHEME_JWT: String = "Jwt"
+        const val SECURITY_SCHEME_API_KEY: String = "API_Key"
     }
 }
