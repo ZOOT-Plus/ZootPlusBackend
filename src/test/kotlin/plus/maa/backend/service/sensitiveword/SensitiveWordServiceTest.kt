@@ -21,6 +21,6 @@ class SensitiveWordServiceTest() {
 
     @Test
     fun `word in whitelist should not trigger an exception`() {
-        assertDoesNotThrow { service.validate("https://creativecommons.org/licenses/jb/4.0/") }
+        assertDoesNotThrow { service.validate("https://www.bilibili.com/video/BVjbjbjbjbjb/") }
     }
 }
