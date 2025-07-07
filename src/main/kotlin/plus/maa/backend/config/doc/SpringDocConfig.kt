@@ -65,7 +65,7 @@ class SpringDocConfig(
                         name("X-API-Key")
                         `in`(SecurityScheme.In.HEADER)
                         description("X-API-Key: your API Key")
-                    }
+                    },
                 )
             },
         )
