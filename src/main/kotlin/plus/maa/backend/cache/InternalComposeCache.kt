@@ -4,6 +4,7 @@ import com.github.benmanes.caffeine.cache.Caffeine
 import com.github.benmanes.caffeine.cache.stats.CacheStats
 import plus.maa.backend.cache.transfer.CopilotInnerCacheInfo
 import plus.maa.backend.repository.entity.MaaUser
+import plus.maa.backend.repository.entity.UserEntity
 import java.time.Duration
 
 object InternalComposeCache {
@@ -19,6 +20,11 @@ object InternalComposeCache {
         .recordStats()
         .expireAfterAccess(Duration.ofDays(3))
         .build<String, MaaUser>()
+
+    private val userEntityCache = Caffeine.newBuilder()
+        .recordStats()
+        .expireAfterAccess(Duration.ofDays(3))
+        .build<String, UserEntity>()
 
     // copilotId -> count
     private val commentCountCache = Caffeine.newBuilder()
@@ -48,6 +54,14 @@ object InternalComposeCache {
 
     fun getMaaUserCacheStat(): CacheStats {
         return maaUserCache.stats()
+    }
+
+    fun getUserCache(userId: String): UserEntity? {
+        return userEntityCache.getIfPresent(userId)
+    }
+
+    fun setUserCache(userId: String, info: UserEntity) {
+        userEntityCache.put(userId, info)
     }
 
     fun setMaaUserCache(userId: String, info: MaaUser) {
