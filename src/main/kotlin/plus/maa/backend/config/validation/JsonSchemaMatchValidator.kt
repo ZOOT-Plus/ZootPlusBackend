@@ -1,12 +1,12 @@
 package plus.maa.backend.config.validation
 
+import com.networknt.schema.InputFormat
+import com.networknt.schema.JsonSchema
+import com.networknt.schema.JsonSchemaFactory
+import com.networknt.schema.SchemaLocation
+import com.networknt.schema.SpecVersion
 import jakarta.validation.ConstraintValidator
 import jakarta.validation.ConstraintValidatorContext
-import org.everit.json.schema.Schema
-import org.everit.json.schema.loader.SchemaLoader
-import org.json.JSONObject
-import org.json.JSONTokener
-import org.springframework.core.io.ClassPathResource
 
 class JsonSchemaMatchValidator : ConstraintValidator<JsonSchemaMatch, String> {
     private lateinit var schema: String
@@ -16,14 +16,15 @@ class JsonSchemaMatchValidator : ConstraintValidator<JsonSchemaMatch, String> {
     }
 
     override fun isValid(text: String?, ctx: ConstraintValidatorContext): Boolean {
-        try {
-            if (text == null) return true
-            val validator = validators[schema] ?: return false
-            validator.validate(text.let(::JSONObject))
+        if (text == null) return true
+        val validator = validators[schema] ?: return false
+        val assertions = validator.validate(text, InputFormat.JSON)
+        if (assertions.isEmpty()) {
             return true
-        } catch (e: Exception) {
+        } else {
             ctx.disableDefaultConstraintViolation()
-            ctx.buildConstraintViolationWithTemplate(e.message).addConstraintViolation()
+            ctx.buildConstraintViolationWithTemplate(assertions.joinToString("\n") { it.message })
+                .addConstraintViolation()
             return false
         }
     }
@@ -34,9 +35,11 @@ class JsonSchemaMatchValidator : ConstraintValidator<JsonSchemaMatch, String> {
             loadSchema(COPILOT_SCHEMA_JSON),
         )
 
+
         @Suppress("SameParameterValue")
-        private fun loadSchema(path: String): Pair<String, Schema> {
-            val schema = ClassPathResource(path).inputStream.let(::JSONTokener).let(::JSONObject).let(SchemaLoader::load)
+        private fun loadSchema(path: String): Pair<String, JsonSchema> {
+            val jsonSchemaFactory = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V202012)
+            val schema = jsonSchemaFactory.getSchema(SchemaLocation.of("classpath:$path"))
             return path to schema
         }
     }

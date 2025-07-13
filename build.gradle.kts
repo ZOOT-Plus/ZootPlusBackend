@@ -93,9 +93,7 @@ dependencies {
     implementation("org.eclipse.jgit:org.eclipse.jgit.ssh.apache.agent:7.1.0.202411261347-r")
     implementation("org.freemarker:freemarker:2.3.34")
     implementation("com.github.ben-manes.caffeine:caffeine:3.2.2")
-    implementation("com.github.erosb:everit-json-schema:1.14.6") {
-        exclude("commons-logging")
-    }
+    implementation("com.networknt:json-schema-validator:1.5.8")
     implementation("com.google.guava:guava:33.4.8-jre")
 
     implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310")
