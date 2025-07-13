@@ -94,7 +94,6 @@ dependencies {
     implementation("org.freemarker:freemarker:2.3.34")
     implementation("com.github.ben-manes.caffeine:caffeine:3.2.2")
     implementation("com.networknt:json-schema-validator:1.5.8")
-    implementation("com.google.guava:guava:33.4.8-jre")
 
     implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310")
 
