@@ -47,6 +47,7 @@ repositories {
 }
 
 dependencies {
+    val ktormVersion = "4.1.1"
     val hutoolVersion = "5.8.39"
     val mapstructVersion = "1.6.3"
 
@@ -77,6 +78,11 @@ dependencies {
     // kotlin-logging
     implementation("io.github.oshai:kotlin-logging-jvm:7.0.7")
 
+    // ktorm
+    implementation("org.ktorm:ktorm-core:$ktormVersion")
+    implementation("org.ktorm:ktorm-jackson:${ktormVersion}")
+    implementation("org.ktorm:ktorm-support-postgresql:${ktormVersion}")
+    implementation("org.postgresql:postgresql:42.7.7")
     // hutool 的邮箱工具类依赖
     implementation("com.sun.mail:javax.mail:1.6.2")
     implementation("cn.hutool:hutool-extra:$hutoolVersion")
