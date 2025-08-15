@@ -15,6 +15,17 @@ services:
     ports:
       - "27017:27017"
     restart: always
+  db:
+    image: postgres:17-alpine
+    container_name: postgres
+    restart: always
+    ports:
+      - 5432:5432
+    volumes:
+      - .././data/:/var/lib/postgresql/data/
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    environment:
+      POSTGRES_PASSWORD: 1234
   zootplusbackend:
     image: ghcr.io/zoot-plus/zootplusbackend:latest
     container_name: ZootPlusBackend
