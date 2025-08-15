@@ -1,8 +1,16 @@
 package plus.maa.backend.service
 
+import org.ktorm.database.Database
+import org.ktorm.dsl.desc
+import org.ktorm.dsl.eq
+import org.ktorm.dsl.like
+import org.ktorm.entity.drop
+import org.ktorm.entity.filter
+import org.ktorm.entity.firstOrNull
+import org.ktorm.entity.sortedBy
+import org.ktorm.entity.take
+import org.ktorm.entity.toList
 import org.springframework.dao.DuplicateKeyException
-import org.springframework.data.domain.Page
-import org.springframework.data.domain.Pageable
 import org.springframework.data.repository.findByIdOrNull
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Service
@@ -17,6 +25,8 @@ import plus.maa.backend.controller.response.user.MaaLoginRsp
 import plus.maa.backend.controller.response.user.MaaUserInfo
 import plus.maa.backend.repository.UserRepository
 import plus.maa.backend.repository.entity.MaaUser
+import plus.maa.backend.repository.entity.UserEntity
+import plus.maa.backend.repository.entity.users
 import plus.maa.backend.service.jwt.JwtExpiredException
 import plus.maa.backend.service.jwt.JwtInvalidException
 import plus.maa.backend.service.jwt.JwtService
@@ -29,6 +39,7 @@ import plus.maa.backend.cache.InternalComposeCache as Cache
  */
 @Service
 class UserService(
+    private val database: Database,
     private val userRepository: UserRepository,
     private val emailService: EmailService,
     private val passwordEncoder: PasswordEncoder,
@@ -232,9 +243,10 @@ class UserService(
         emailService.sendVCode(regDTO.email)
     }
 
-    fun findByUserIdOrDefault(id: String) = userRepository.findByUserId(id) ?: MaaUser.UNKNOWN
+    fun findByUserIdOrDefault(id: String) =
+        database.users.filter { it.userId eq id }.firstOrNull()?: UserEntity.UNKNOWN
 
-    fun findByUserIdOrDefaultInCache(id: String): MaaUser {
+    fun findByUserIdOrDefaultInCache(id: String): UserEntity {
         return Cache.getMaaUserCache(id, ::findByUserIdOrDefault)
     }
 
@@ -249,13 +261,18 @@ class UserService(
         fun getOrDefault(id: String) = get(id) ?: MaaUser.UNKNOWN
     }
 
-    fun get(userId: String): MaaUserInfo? = userRepository.findByUserId(userId)?.run(::MaaUserInfo)
+    fun get(userId: String): MaaUserInfo? =
+        database.users.filter { it.userId eq userId }.firstOrNull()?.run(::MaaUserInfo)
 
     /**
      * 用户模糊搜索
      */
-    fun search(userName: String, pageable: Pageable): Page<MaaUserInfo> {
-        return userRepository.searchUsers(userName, pageable)
+    fun search(userName: String, offset: Int, limit: Int): List<UserEntity> {
+        return database.users.filter { it.userName like "%$userName%" }
+            .sortedBy { it.fansCount.desc() }
+            .drop(offset)
+            .take(limit)
+            .toList()
     }
 
     @Suppress("unused")

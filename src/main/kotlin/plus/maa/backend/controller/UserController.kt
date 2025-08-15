@@ -6,7 +6,6 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
 import jakarta.validation.constraints.Max
-import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
 import org.springframework.validation.annotation.Validated
 import org.springframework.web.bind.annotation.GetMapping
@@ -179,8 +178,7 @@ class UserController(
         @RequestParam page: Int = 1,
         @Max(50, message = "查询用户量不能超过50") @RequestParam size: Int = 10,
     ): MaaResult<List<MaaUserInfo>> {
-        val pageable = PageRequest.of(page - 1, size)
-        val resultPage = userService.search(userName, pageable)
-        return success(resultPage.content)
+        val result = userService.search(userName, (page - 1) * size, size)
+        return success(result.map(::MaaUserInfo))
     }
 }
