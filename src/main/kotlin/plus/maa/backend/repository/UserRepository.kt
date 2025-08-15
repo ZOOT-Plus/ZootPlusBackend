@@ -6,6 +6,7 @@ import org.springframework.data.mongodb.repository.MongoRepository
 import org.springframework.data.mongodb.repository.Query
 import plus.maa.backend.controller.response.user.MaaUserInfo
 import plus.maa.backend.repository.entity.MaaUser
+import java.util.stream.Stream
 
 /**
  * @author AnselYuki
@@ -25,4 +26,7 @@ interface UserRepository : MongoRepository<MaaUser, String> {
     fun searchUsers(userName: String, pageable: Pageable): Page<MaaUserInfo>
 
     fun existsByUserName(userName: String): Boolean
+
+    fun findAllBy(): Stream<MaaUser>
+
 }
