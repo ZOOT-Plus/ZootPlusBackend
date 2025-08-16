@@ -7,12 +7,12 @@ import org.ktorm.schema.Table
 import org.ktorm.schema.long
 import org.ktorm.schema.varchar
 
-interface OperatorEntity: Entity<OperatorEntity> {
+interface OperatorEntity : Entity<OperatorEntity> {
     val id: Long
     var copilot: CopilotEntity
     var name: String
 
-    companion object: Entity.Factory<OperatorEntity>()
+    companion object : Entity.Factory<OperatorEntity>()
 }
 
 object Operators : Table<OperatorEntity>("copilot_operator") {

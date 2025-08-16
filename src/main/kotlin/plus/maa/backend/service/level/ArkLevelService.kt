@@ -20,9 +20,9 @@ import plus.maa.backend.common.extensions.lazySuspend
 import plus.maa.backend.common.extensions.meetAll
 import plus.maa.backend.common.extensions.traceRun
 import plus.maa.backend.common.utils.converter.ArkLevelConverter
+import plus.maa.backend.common.utils.converter.ArkLevelEntityConverter
 import plus.maa.backend.config.external.MaaCopilotProperties
 import plus.maa.backend.controller.response.copilot.ArkLevelInfo
-import plus.maa.backend.repository.ArkLevelRepository
 import plus.maa.backend.repository.GithubRepository
 import plus.maa.backend.repository.RedisCache
 import plus.maa.backend.repository.entity.ArkLevel
@@ -30,6 +30,7 @@ import plus.maa.backend.repository.entity.gamedata.ArkTilePos
 import plus.maa.backend.repository.entity.gamedata.MaaArkStage
 import plus.maa.backend.repository.entity.github.GithubCommit
 import plus.maa.backend.repository.entity.github.GithubTree
+import plus.maa.backend.repository.ktorm.ArkLevelKtormRepository
 import reactor.netty.http.client.HttpClient
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
@@ -46,9 +47,10 @@ class ArkLevelService(
     properties: MaaCopilotProperties,
     private val githubRepo: GithubRepository,
     private val redisCache: RedisCache,
-    private val arkLevelRepo: ArkLevelRepository,
+    private val arkLevelKtormRepo: ArkLevelKtormRepository,
     private val mapper: ObjectMapper,
     private val arkLevelConverter: ArkLevelConverter,
+    private val arkLevelEntityConverter: ArkLevelEntityConverter,
     webClientBuilder: WebClient.Builder,
 ) {
     private val log = KotlinLogging.logger { }
@@ -62,14 +64,20 @@ class ArkLevelService(
 
     @get:Cacheable("arkLevelInfos")
     val arkLevelInfos: List<ArkLevelInfo>
-        get() = arkLevelRepo.findAll().map { arkLevel -> arkLevelConverter.convert(arkLevel) }
+        get() {
+            val entities = arkLevelKtormRepo.findAll()
+            return arkLevelConverter.convert(entities)
+        }
 
     @Cacheable("arkLevel")
-    fun findByLevelIdFuzzy(levelId: String): ArkLevel? = arkLevelRepo.findByLevelIdFuzzy(levelId).firstOrNull()
+    fun findByLevelIdFuzzy(levelId: String): ArkLevel? {
+        val entities = arkLevelKtormRepo.findByLevelIdFuzzy(levelId)
+        return entities.firstOrNull()?.let { arkLevelEntityConverter.convertFromEntity(it) }
+    }
 
     fun queryLevelInfosByKeyword(keyword: String): List<ArkLevelInfo> {
-        val levels = arkLevelRepo.queryLevelByKeyword(keyword)
-        return arkLevelConverter.convert(levels)
+        val entities = arkLevelKtormRepo.queryLevelByKeyword(keyword)
+        return arkLevelConverter.convert(entities)
     }
 
     /**
@@ -87,7 +95,7 @@ class ArkLevelService(
                 logI { "已发现 ${trees.size} 份地图数据" }
 
                 // 根据 sha 筛选无需更新的地图
-                val shaSet = withContext(Dispatchers.IO) { arkLevelRepo.findAllShaBy() }.map { it.sha }.toSet()
+                val shaSet = withContext(Dispatchers.IO) { arkLevelKtormRepo.findAllShaBy() }.map { it.sha }.toSet()
                 val filtered = trees.filter { !shaSet.contains(it.sha) }
 
                 val parser = fetchLevelParser()
@@ -146,7 +154,8 @@ class ArkLevelService(
                 pass.incrementAndGet()
                 logI { entryInfo(tree.path, "未知类型，跳过") }
             } else {
-                withContext(Dispatchers.IO) { arkLevelRepo.save(level) }
+                val entity = arkLevelEntityConverter.convertToEntity(level)
+                withContext(Dispatchers.IO) { arkLevelKtormRepo.save(entity) }
                 success.incrementAndGet()
                 logI { entryInfo(tree.path, "成功") }
             }
@@ -177,9 +186,9 @@ class ArkLevelService(
                 val now = LocalDateTime.now()
 
                 logI { "下载完成，开始更新" }
-                updateLevelsOfTypeInBatch(ArkLevelType.ACTIVITIES) { level ->
-                    level.isOpen = ArkLevelUtil.getKeyInfoById(level.stageId) in openStageKeys
-                    level.closeTime = if (level.isOpen ?: false) null else level.closeTime ?: now
+                updateLevelsOfTypeInBatch(ArkLevelType.ACTIVITIES) { entity ->
+                    entity.isOpen = ArkLevelUtil.getKeyInfoById(entity.stageId) in openStageKeys
+                    entity.closeTime = if (entity.isOpen ?: false) null else entity.closeTime ?: now
                 }
                 logI { "更新完成" }
             }
@@ -197,20 +206,24 @@ class ArkLevelService(
         val holder = ArkGameDataHolder.updateCrisisV2Info(fetchDataHolder(), webClient)
         val nowTime = LocalDateTime.now()
 
-        updateLevelsOfTypeInBatch(ArkLevelType.RUNE) { level ->
-            val info = holder.findCrisisV2InfoById(level.stageId) ?: return@updateLevelsOfTypeInBatch
-            level.closeTime = LocalDateTime.ofEpochSecond(info.endTs, 0, ZoneOffset.UTC)
-            level.isOpen = level.closeTime?.isAfter(nowTime)
+        updateLevelsOfTypeInBatch(ArkLevelType.RUNE) { entity ->
+            val info = holder.findCrisisV2InfoById(entity.stageId) ?: return@updateLevelsOfTypeInBatch
+            entity.closeTime = LocalDateTime.ofEpochSecond(info.endTs, 0, ZoneOffset.UTC)
+            entity.isOpen = entity.closeTime?.isAfter(nowTime)
         }
         logI { "开放状态更新完毕" }
     }
 
-    suspend fun updateLevelsOfTypeInBatch(catOne: ArkLevelType, batchSize: Int = 1000, block: (ArkLevel) -> Unit) {
+    suspend fun updateLevelsOfTypeInBatch(
+        catOne: ArkLevelType,
+        batchSize: Int = 1000,
+        block: (plus.maa.backend.repository.entity.ArkLevelEntity) -> Unit,
+    ) {
         var pageable = Pageable.ofSize(batchSize)
         do {
-            val page = withContext(Dispatchers.IO) { arkLevelRepo.findAllByCatOne(catOne.display, pageable) }
+            val page = withContext(Dispatchers.IO) { arkLevelKtormRepo.findAllByCatOne(catOne.display, pageable) }
             page.forEach(block)
-            withContext(Dispatchers.IO) { arkLevelRepo.saveAll(page) }
+            withContext(Dispatchers.IO) { arkLevelKtormRepo.saveAll(page.content) }
             pageable = page.nextPageable()
         } while (page.hasNext())
     }

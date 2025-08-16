@@ -19,10 +19,10 @@ interface UserEntity : Entity<UserEntity> {
     var followingCount: Int
     var fansCount: Int
 
-    companion object: Entity.Factory<UserEntity>() {
+    companion object : Entity.Factory<UserEntity>() {
         val UNKNOWN = UserEntity {
             userId = ""
-            userName = "未知用户:("
+            userName = "未知用户"
             email = "unknown@unkown.unkown"
             password = "unknown"
         }

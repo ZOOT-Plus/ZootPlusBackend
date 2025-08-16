@@ -2,7 +2,7 @@ package plus.maa.backend.common.utils.converter
 
 import org.mapstruct.Mapper
 import plus.maa.backend.controller.response.copilot.ArkLevelInfo
-import plus.maa.backend.repository.entity.ArkLevel
+import plus.maa.backend.repository.entity.ArkLevelEntity
 
 /**
  * @author dragove
@@ -10,7 +10,20 @@ import plus.maa.backend.repository.entity.ArkLevel
  */
 @Mapper(componentModel = "spring")
 interface ArkLevelConverter {
-    fun convert(arkLevel: ArkLevel): ArkLevelInfo
+    fun convert(arkLevel: ArkLevelEntity): ArkLevelInfo {
+        return ArkLevelInfo(
+            levelId = arkLevel.levelId ?: "",
+            stageId = arkLevel.stageId ?: "",
+            catOne = arkLevel.catOne ?: "",
+            catTwo = arkLevel.catTwo ?: "",
+            catThree = arkLevel.catThree ?: "",
+            name = arkLevel.name ?: "",
+            width = arkLevel.width,
+            height = arkLevel.height,
+        )
+    }
 
-    fun convert(arkLevel: List<ArkLevel>): List<ArkLevelInfo>
+    fun convert(arkLevels: List<ArkLevelEntity>): List<ArkLevelInfo> {
+        return arkLevels.map { convert(it) }
+    }
 }

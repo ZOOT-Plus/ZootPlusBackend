@@ -1,8 +1,5 @@
 package plus.maa.backend.repository.entity
 
-import org.springframework.data.annotation.Id
-import org.springframework.data.mongodb.core.index.Indexed
-import org.springframework.data.mongodb.core.mapping.Document
 import java.io.Serializable
 import java.time.LocalDateTime
 
@@ -10,11 +7,8 @@ import java.time.LocalDateTime
  * @author LoMu
  * Date  2023-02-17 14:50
  */
-@Document("maa_comments_area")
 class CommentsArea(
-    @Id
     var id: String? = null,
-    @Indexed
     val copilotId: Long,
     // 答复某个评论
     val fromCommentId: String? = null,

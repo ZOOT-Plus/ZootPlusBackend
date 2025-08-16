@@ -1,11 +1,15 @@
 package plus.maa.backend.common.utils
 
 import io.github.oshai.kotlinlogging.KotlinLogging
-import org.springframework.data.domain.Sort
-import org.springframework.data.mongodb.core.MongoTemplate
-import org.springframework.data.mongodb.core.query.Query
+import org.ktorm.database.Database
+import org.ktorm.dsl.from
+import org.ktorm.dsl.map
+import org.ktorm.dsl.max
+import org.ktorm.dsl.select
 import org.springframework.stereotype.Component
 import plus.maa.backend.repository.entity.CollectionMeta
+import plus.maa.backend.repository.entity.CopilotSets
+import plus.maa.backend.repository.entity.Copilots
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
@@ -13,7 +17,7 @@ private val log = KotlinLogging.logger { }
 
 @Component
 class IdComponent(
-    private val mongoTemplate: MongoTemplate,
+    private val database: Database,
 ) {
     private val currentIdMap: MutableMap<String, AtomicLong> = ConcurrentHashMap()
 
@@ -23,15 +27,15 @@ class IdComponent(
      * @return 新的id
      */
     fun <T> getId(meta: CollectionMeta<T>): Long {
-        val cls = meta.entityClass
-        val collectionName = mongoTemplate.getCollectionName(cls)
+        val collectionName = meta.entityClass.simpleName
         val v = currentIdMap[collectionName]
         if (v == null) {
-            synchronized(cls) {
+            synchronized(meta.entityClass) {
                 val rv = currentIdMap[collectionName]
                 if (rv == null) {
-                    val nv = AtomicLong(getMax(cls, meta.idGetter, meta.incIdField))
-                    log.info { "初始化获取 collection: $collectionName 的最大 id，id: ${nv.get()}" }
+                    val maxId = getMaxId(meta.entityClass)
+                    val nv = AtomicLong(maxId)
+                    log.info { "初始化获取 $collectionName 的最大 id，id: ${nv.get()}" }
                     currentIdMap[collectionName] = nv
                     return nv.incrementAndGet()
                 }
@@ -41,10 +45,15 @@ class IdComponent(
         return v.incrementAndGet()
     }
 
-    private fun <T> getMax(entityClass: Class<T>, idGetter: (T) -> Long, fieldName: String) = mongoTemplate.findOne(
-        Query().with(Sort.by(fieldName).descending()).limit(1),
-        entityClass,
-    )
-        ?.let(idGetter)
-        ?: 20000L
+    private fun <T> getMaxId(entityClass: Class<T>): Long {
+        return when (entityClass.simpleName) {
+            "Copilot" -> {
+                database.from(Copilots).select(max(Copilots.copilotId)).map { it.getLong(1) }.firstOrNull() ?: 20000L
+            }
+            "CopilotSet" -> {
+                database.from(CopilotSets).select(max(CopilotSets.id)).map { it.getLong(1) }.firstOrNull() ?: 20000L
+            }
+            else -> 20000L
+        }
+    }
 }

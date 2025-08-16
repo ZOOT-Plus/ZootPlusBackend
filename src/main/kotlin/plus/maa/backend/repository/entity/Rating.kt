@@ -1,9 +1,5 @@
 package plus.maa.backend.repository.entity
 
-import org.springframework.data.annotation.Id
-import org.springframework.data.mongodb.core.index.CompoundIndex
-import org.springframework.data.mongodb.core.index.CompoundIndexes
-import org.springframework.data.mongodb.core.mapping.Document
 import plus.maa.backend.service.model.RatingType
 import java.time.LocalDateTime
 
@@ -13,10 +9,7 @@ import java.time.LocalDateTime
  * Date  2023-08-20 11:20
  * @author lixuhuilll
  */
-@Document(collection = "maa_rating") // 复合索引
-@CompoundIndexes(CompoundIndex(name = "idx_rating", def = "{'type': 1, 'key': 1, 'userId': 1}", unique = true))
 data class Rating(
-    @Id
     val id: String? = null,
     /**
      * 评级的类型，如作业(copilot)、评论(comment)
