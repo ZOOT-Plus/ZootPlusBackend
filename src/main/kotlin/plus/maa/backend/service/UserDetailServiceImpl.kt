@@ -6,8 +6,9 @@ import org.springframework.security.core.userdetails.UserDetails
 import org.springframework.security.core.userdetails.UserDetailsService
 import org.springframework.security.core.userdetails.UsernameNotFoundException
 import org.springframework.stereotype.Service
-import plus.maa.backend.repository.UserRepository
+import plus.maa.backend.common.extensions.toMaaUser
 import plus.maa.backend.repository.entity.MaaUser
+import plus.maa.backend.repository.ktorm.UserKtormRepository
 import plus.maa.backend.service.model.LoginUser
 
 /**
@@ -15,7 +16,7 @@ import plus.maa.backend.service.model.LoginUser
  */
 @Service
 class UserDetailServiceImpl(
-    private val userRepository: UserRepository,
+    private val userRepository: UserKtormRepository,
 ) : UserDetailsService {
     /**
      * 查询用户信息
@@ -26,7 +27,8 @@ class UserDetailServiceImpl(
      */
     @Throws(UsernameNotFoundException::class)
     override fun loadUserByUsername(email: String): UserDetails {
-        val user = userRepository.findByEmail(email) ?: throw UsernameNotFoundException("用户不存在")
+        val userEntity = userRepository.findByEmail(email) ?: throw UsernameNotFoundException("用户不存在")
+        val user = userEntity.toMaaUser()
 
         val permissions = collectAuthoritiesFor(user)
         // 数据封装成UserDetails返回

@@ -3,10 +3,6 @@ package plus.maa.backend.repository.entity
 import com.fasterxml.jackson.annotation.JsonIgnore
 import com.fasterxml.jackson.databind.PropertyNamingStrategies
 import com.fasterxml.jackson.databind.annotation.JsonNaming
-import org.springframework.data.annotation.Id
-import org.springframework.data.annotation.Transient
-import org.springframework.data.mongodb.core.index.Indexed
-import org.springframework.data.mongodb.core.mapping.Document
 import plus.maa.backend.service.model.CommentStatus
 import plus.maa.backend.service.model.CopilotSetStatus
 import java.io.Serializable
@@ -17,20 +13,15 @@ import java.time.LocalDateTime
  * Date 2022-12-25 17:56
  */
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy::class)
-@Document("maa_copilot")
 class Copilot(
-    @Id
     var id: String? = null,
     // 自增数字ID
-    @Indexed(unique = true)
     var copilotId: Long? = null,
     // 关卡名
-    @Indexed
     var stageName: String? = null,
     // 上传者id
     var uploaderId: String? = null,
     // 查看次数
-    @Indexed
     var views: Long = 0L,
     // 评级
     var ratingLevel: Int = 0,
@@ -40,7 +31,6 @@ class Copilot(
     var dislikeCount: Long = 0,
 
     // 热度
-    @Indexed
     var hotScore: Double = 0.0,
     // 难度
     var difficulty: Int = 0,
@@ -153,7 +143,6 @@ class Copilot(
     ) : Serializable
 
     companion object {
-        @Transient
         val META: CollectionMeta<Copilot> =
             CollectionMeta(
                 { obj: Copilot -> obj.copilotId!! },

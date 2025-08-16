@@ -10,7 +10,7 @@ import plus.maa.backend.repository.entity.Copilot
 data class CopilotDTO(
     // 关卡名
     @field:NotBlank(message = "关卡名不能为空")
-    var stageName: String,
+    var stageName: String = "",
     // 难度
     val difficulty: Int = 0,
     // 版本号(文档中说明:最低要求 maa 版本号，必选。保留字段)

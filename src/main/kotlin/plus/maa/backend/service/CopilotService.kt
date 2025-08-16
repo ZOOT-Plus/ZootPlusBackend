@@ -25,17 +25,12 @@ import org.ktorm.entity.toList
 import org.ktorm.expression.ArgumentExpression
 import org.ktorm.schema.BooleanSqlType
 import org.ktorm.schema.ColumnDeclaring
-import org.springframework.data.mongodb.core.MongoTemplate
-import org.springframework.data.mongodb.core.query.Criteria
-import org.springframework.data.mongodb.core.query.Query
-import org.springframework.data.mongodb.core.query.Update
 import org.springframework.stereotype.Service
 import plus.maa.backend.cache.transfer.CopilotInnerCacheInfo
 import plus.maa.backend.common.extensions.blankAsNull
 import plus.maa.backend.common.extensions.removeQuotes
 import plus.maa.backend.common.extensions.requireNotNull
 import plus.maa.backend.common.utils.IdComponent
-import plus.maa.backend.common.utils.converter.CopilotConverter
 import plus.maa.backend.config.external.MaaCopilotProperties
 import plus.maa.backend.controller.request.copilot.CopilotCUDRequest
 import plus.maa.backend.controller.request.copilot.CopilotDTO
@@ -44,18 +39,18 @@ import plus.maa.backend.controller.request.copilot.CopilotRatingReq
 import plus.maa.backend.controller.response.MaaResultException
 import plus.maa.backend.controller.response.copilot.CopilotInfo
 import plus.maa.backend.controller.response.copilot.CopilotPageInfo
-import plus.maa.backend.repository.CommentsAreaRepository
-import plus.maa.backend.repository.CopilotRepository
 import plus.maa.backend.repository.RedisCache
-import plus.maa.backend.repository.UserFollowingRepository
 import plus.maa.backend.repository.entity.Copilot
 import plus.maa.backend.repository.entity.Copilot.OperationGroup
 import plus.maa.backend.repository.entity.CopilotEntity
 import plus.maa.backend.repository.entity.Operators
-import plus.maa.backend.repository.entity.Rating
+import plus.maa.backend.repository.entity.RatingEntity
 import plus.maa.backend.repository.entity.UserEntity
 import plus.maa.backend.repository.entity.copilots
 import plus.maa.backend.repository.entity.users
+import plus.maa.backend.repository.ktorm.CommentsAreaKtormRepository
+import plus.maa.backend.repository.ktorm.CopilotKtormRepository
+import plus.maa.backend.repository.ktorm.UserFollowingKtormRepository
 import plus.maa.backend.service.level.ArkLevelService
 import plus.maa.backend.service.model.CommentStatus
 import plus.maa.backend.service.model.CopilotSetStatus
@@ -79,20 +74,18 @@ import plus.maa.backend.cache.InternalComposeCache as Cache
 @Service
 class CopilotService(
     private val database: Database,
-    private val copilotRepository: CopilotRepository,
+    private val copilotKtormRepository: CopilotKtormRepository,
     private val ratingService: RatingService,
-    private val mongoTemplate: MongoTemplate,
     private val mapper: ObjectMapper,
     private val levelService: ArkLevelService,
     private val redisCache: RedisCache,
     private val idComponent: IdComponent,
     private val userRepository: UserService,
-    private val commentsAreaRepository: CommentsAreaRepository,
+    private val commentsAreaKtormRepository: CommentsAreaKtormRepository,
     private val properties: MaaCopilotProperties,
-    private val copilotConverter: CopilotConverter,
     private val sensitiveWordService: SensitiveWordService,
     private val segmentService: SegmentService,
-    private val userFollowingRepository: UserFollowingRepository,
+    private val userFollowingKtormRepository: UserFollowingKtormRepository,
     private val objectMapper: ObjectMapper,
 ) {
     private val log = KotlinLogging.logger { }
@@ -129,17 +122,36 @@ class CopilotService(
     /**
      * 上传新的作业
      */
-    fun upload(loginUserId: String, request: CopilotCUDRequest): Long = copilotConverter.toCopilot(
-        request.content.parseToCopilotDto(),
-        idComponent.getId(Copilot.META),
-        loginUserId,
-        LocalDateTime.now(),
-        request.content,
-        request.status,
-    ).run {
-        copilotRepository.insert(this).copilotId!!.also {
-            segmentService.updateIndex(it, doc?.title, doc?.details)
+    fun upload(loginUserId: String, request: CopilotCUDRequest): Long {
+        val dto = request.content.parseToCopilotDto()
+        val copilotId = idComponent.getId(Copilot.META)
+        val now = LocalDateTime.now()
+
+        val entity = CopilotEntity {
+            this.copilotId = copilotId
+            this.stageName = dto.stageName
+            this.uploaderId = loginUserId
+            this.views = 0L
+            this.ratingLevel = 0
+            this.ratingRatio = 0.0
+            this.likeCount = 0L
+            this.dislikeCount = 0L
+            this.hotScore = 0.0
+            this.title = dto.doc?.title ?: ""
+            this.details = dto.doc?.details
+            this.firstUploadTime = now
+            this.uploadTime = now
+            this.content = request.content
+            this.status = request.status
+            this.commentStatus = CommentStatus.ENABLED
+            this.delete = false
+            this.deleteTime = null
+            this.notification = false
         }
+
+        copilotKtormRepository.insertEntity(entity)
+        segmentService.updateIndex(copilotId, entity.title, entity.details)
+        return copilotId
     }
 
     /**
@@ -151,7 +163,7 @@ class CopilotService(
     }.apply {
         // 删除作业时，如果被删除的项在 Redis 首页缓存中存在，则清空对应的首页缓存
         // 新增作业就不必，因为新作业显然不会那么快就登上热度榜和浏览量榜
-        deleteCacheWhenMatchCopilotId(copilotId!!)
+        deleteCacheWhenMatchCopilotId(copilotId)
         Cache.invalidateCopilotInfoByCid(copilotId)
     }
 
@@ -161,16 +173,16 @@ class CopilotService(
     fun getCopilotById(userIdOrIpAddress: String, id: Long): CopilotInfo? {
         val result = Cache.getCopilotCache(id) {
             database.copilots.filter { copilot ->
-                copilot.copilotId eq id and copilot.delete eq false
+                (copilot.copilotId eq id) and (copilot.delete eq false)
             }.firstOrNull()?.run {
-                CopilotInnerCacheInfo(this)
+                CopilotInnerCacheInfo(this.copy())
             }
-        }?.let { it ->
+        }?.let {
             val copilot = it.info
             val maaUser = userRepository.findByUserIdOrDefaultInCache(copilot.uploaderId)
 
             val commentsCount = Cache.getCommentCountCache(copilot.copilotId) { cid ->
-                commentsAreaRepository.countByCopilotIdAndDelete(cid, false)
+                commentsAreaKtormRepository.countByCopilotIdAndDelete(cid, false)
             }
             copilot.format(
                 ratingService.findPersonalRatingOfCopilot(userIdOrIpAddress, id),
@@ -193,11 +205,10 @@ class CopilotService(
                 second.incrementAndGet()
                 // 丢到调度队列中, 一致性要求不高
                 Thread.startVirtualThread {
-                    val query = Query.query(Criteria.where("copilotId").`is`(id))
-                    val update = Update().apply {
-                        inc("views")
+                    copilotKtormRepository.findByCopilotIdAndDeleteIsFalse(id)?.let { copilot ->
+                        copilot.views += 1
+                        copilotKtormRepository.updateEntity(copilot)
                     }
-                    mongoTemplate.updateFirst(query, update, Copilot::class.java)
                 }
             }
         }?.run {
@@ -239,8 +250,7 @@ class CopilotService(
 
         var inUserIds: List<String>? = null
         if (request.onlyFollowing && userId != null) {
-            val userFollowing = userFollowingRepository.findByUserId(userId)
-            val followingIds = userFollowing?.followList ?: emptyList()
+            val followingIds = userFollowingKtormRepository.getFollowingIds(userId)
             if (followingIds.isEmpty()) {
                 return CopilotPageInfo(false, 0, 0, emptyList())
             }
@@ -262,7 +272,7 @@ class CopilotService(
                 ?.let { words ->
                     val idList = words.mapNotNull {
                         val result = segmentService.fetchIndexInfo(it)
-                        if (it.lowercase() == keyword?.lowercase() && result.isEmpty()) {
+                        if (it.equals(keyword, ignoreCase = true) && result.isEmpty()) {
                             null
                         } else {
                             result
@@ -337,14 +347,18 @@ class CopilotService(
                 conditions += it.copilotId inList inCopilotIds
             }
             if (includeOps != null) {
-                conditions += it.copilotId inList (database.from(Operators)
-                    .select(Operators.copilotId)
-                    .where { Operators.name inList includeOps })
+                conditions += it.copilotId inList (
+                    database.from(Operators)
+                        .select(Operators.copilotId)
+                        .where { Operators.name inList includeOps }
+                    )
             }
             if (notIncludeOps != null) {
-                conditions += it.copilotId notInList (database.from(Operators)
-                    .select(Operators.copilotId)
-                    .where { Operators.name inList notIncludeOps })
+                conditions += it.copilotId notInList (
+                    database.from(Operators)
+                        .select(Operators.copilotId)
+                        .where { Operators.name inList notIncludeOps }
+                    )
             }
             conditions.reduce { a, b -> a and b }
         }.sortedBy {
@@ -354,8 +368,11 @@ class CopilotService(
                 "views" -> it.views
                 else -> it.copilotId
             }
-            if (request.desc) ord.desc()
-            else ord.asc()
+            if (request.desc) {
+                ord.desc()
+            } else {
+                ord.asc()
+            }
         }.drop((page - 1) * limit).take(limit)
 
         val resultAgg = if (keyword.isNullOrEmpty() &&
@@ -391,7 +408,7 @@ class CopilotService(
         if (remainingUserIds.isNotEmpty()) {
             val users = database.users.filter { it.userId inList remainingUserIds }
             users.forEach {
-                maaUsers.put(it.userId, it)
+                maaUsers[it.userId] = it
                 Cache.setUserCache(it.userId, it)
             }
         }
@@ -406,7 +423,7 @@ class CopilotService(
         }.toList()
 
         if (remainingCopilotIds.isNotEmpty()) {
-            val existedCount = commentsAreaRepository.findByCopilotIdInAndDelete(remainingCopilotIds, false)
+            val existedCount = commentsAreaKtormRepository.findByCopilotIdInAndDelete(remainingCopilotIds, false)
                 .groupBy { it.copilotId }
                 .mapValues { it.value.size.toLong() }
             copilotIds.forEach { copilotId ->
@@ -452,20 +469,21 @@ class CopilotService(
         var cIdToDeleteCache: Long? = null
 
         userEditCopilot(loginUserId, request.id) {
-            segmentService.removeIndex(copilotId!!, doc?.title, doc?.details)
+            segmentService.removeIndex(copilotId, title, details)
 
             // 从公开改为隐藏时，如果数据存在缓存中则需要清除缓存
             if (status == CopilotSetStatus.PUBLIC && request.status == CopilotSetStatus.PRIVATE) cIdToDeleteCache = copilotId
-            copilotConverter.updateCopilotFromDto(
-                request.content.parseToCopilotDto(),
-                request.content,
-                this,
-                request.status,
-            )
+
+            val dto = request.content.parseToCopilotDto()
+            stageName = dto.stageName
+            title = dto.doc?.title ?: title
+            details = dto.doc?.details ?: details
+            content = request.content
+            status = request.status
             uploadTime = LocalDateTime.now()
         }.apply {
             Cache.invalidateCopilotInfoByCid(copilotId)
-            segmentService.updateIndex(copilotId!!, doc?.title, doc?.details)
+            segmentService.updateIndex(copilotId, title, details)
         }
 
         cIdToDeleteCache?.let {
@@ -480,7 +498,7 @@ class CopilotService(
      * @param userIdOrIpAddress 用于已登录用户作出评分
      */
     fun rates(userIdOrIpAddress: String, request: CopilotRatingReq) {
-        requireNotNull(copilotRepository.existsCopilotsByCopilotId(request.id)) { "作业id不存在" }
+        requireNotNull(copilotKtormRepository.existsByCopilotId(request.id)) { "作业id不存在" }
 
         val ratingChange = ratingService.rateCopilot(
             request.id,
@@ -489,13 +507,8 @@ class CopilotService(
         )
         val (likeCountChange, dislikeCountChange) = ratingService.calcLikeChange(ratingChange)
 
-        // 获取只包含评分的作业
-        var query = Query.query(
-            Criteria.where("copilotId").`is`(request.id).and("delete").`is`(false),
-        )
-        // 排除 _id，防止误 save 该不完整作业后原有数据丢失
-        query.fields().include("likeCount", "dislikeCount").exclude("_id")
-        val copilot = mongoTemplate.findOne(query, Copilot::class.java)
+        // 获取作业
+        val copilot = copilotKtormRepository.findByCopilotIdAndDeleteIsFalse(request.id)
         checkNotNull(copilot) { "作业不存在" }
 
         // 计算评分相关
@@ -506,15 +519,11 @@ class CopilotService(
         // 只取一位小数点
         val ratingLevel = rawRatingLevel.toBigDecimal().setScale(1, RoundingMode.HALF_UP).toDouble()
         // 更新数据
-        query = Query.query(
-            Criteria.where("copilotId").`is`(request.id).and("delete").`is`(false),
-        )
-        val update = Update()
-        update["likeCount"] = likeCount
-        update["dislikeCount"] = ratingCount - likeCount
-        update["ratingLevel"] = (ratingLevel * 10).toInt()
-        update["ratingRatio"] = ratingLevel
-        mongoTemplate.updateFirst(query, update, Copilot::class.java)
+        copilot.likeCount = likeCount
+        copilot.dislikeCount = ratingCount - likeCount
+        copilot.ratingLevel = (ratingLevel * 10).toInt()
+        copilot.ratingRatio = ratingLevel
+        copilotKtormRepository.updateEntity(copilot)
 
         // 记录近期评分变化量前 100 的作业 id
         redisCache.incZSet(
@@ -526,8 +535,7 @@ class CopilotService(
         )
     }
 
-
-    private fun CopilotEntity.format(rating: Rating?, userName: String, commentsCount: Long) = CopilotInfo(
+    private fun CopilotEntity.format(rating: RatingEntity?, userName: String, commentsCount: Long) = CopilotInfo(
         id = copilotId,
         uploadTime = uploadTime,
         uploaderId = uploaderId,
@@ -555,11 +563,13 @@ class CopilotService(
         commentStatus = status
     }
 
-    fun userEditCopilot(userId: String?, copilotId: Long?, edit: Copilot.() -> Unit): Copilot {
+    fun userEditCopilot(userId: String?, copilotId: Long?, edit: CopilotEntity.() -> Unit): CopilotEntity {
         val cId = copilotId.requireNotNull { "copilotId 不能为空" }
-        val copilot = copilotRepository.findByCopilotIdAndDeleteIsFalse(cId).requireNotNull { "copilot 不存在" }
+        val copilot = copilotKtormRepository.findByCopilotIdAndDeleteIsFalse(cId).requireNotNull { "copilot 不存在" }
         require(copilot.uploaderId == userId) { "您没有权限修改" }
-        return copilot.apply(edit).run(copilotRepository::save)
+        copilot.apply(edit)
+        copilotKtormRepository.updateEntity(copilot)
+        return copilot
     }
 
     /**

@@ -69,7 +69,6 @@ interface CopilotEntity : Entity<CopilotEntity> {
     var notification: Boolean
 
     companion object : Entity.Factory<CopilotEntity>()
-
 }
 
 object Copilots : Table<CopilotEntity>("copilot") {

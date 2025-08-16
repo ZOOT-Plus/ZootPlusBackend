@@ -9,12 +9,10 @@ import plus.maa.backend.repository.entity.copilots
 
 @Repository
 class CopilotRepo(
-    val database: Database
+    val database: Database,
 ) {
 
-    fun getById(id: Long) =
-        database.copilots.filter { it.copilotId eq id }.firstOrNull()
+    fun getById(id: Long) = database.copilots.filter { it.copilotId eq id }.firstOrNull()
 
-    fun getNotDeletedQuery() =
-        database.copilots.filter { it.delete eq false }
+    fun getNotDeletedQuery() = database.copilots.filter { it.delete eq false }
 }
