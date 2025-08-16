@@ -1,3 +1,4 @@
+import org.hidetake.gradle.swagger.generator.GenerateSwaggerCode
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jlleitschuh.gradle.ktlint.reporter.ReporterType
 
