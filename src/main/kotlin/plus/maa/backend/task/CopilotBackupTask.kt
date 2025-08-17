@@ -13,8 +13,8 @@ import org.eclipse.jgit.util.FS
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import plus.maa.backend.config.external.MaaCopilotProperties
-import plus.maa.backend.repository.CopilotRepository
-import plus.maa.backend.repository.entity.Copilot
+import plus.maa.backend.repository.entity.CopilotEntity
+import plus.maa.backend.repository.ktorm.CopilotKtormRepository
 import plus.maa.backend.service.level.ArkLevelService
 import plus.maa.backend.service.model.CopilotSetStatus
 import java.io.File
@@ -32,7 +32,7 @@ private val log = KotlinLogging.logger { }
 @Component
 class CopilotBackupTask(
     private val config: MaaCopilotProperties,
-    private val copilotRepository: CopilotRepository,
+    private val copilotKtormRepository: CopilotKtormRepository,
     private val levelService: ArkLevelService,
 ) {
     private lateinit var git: Git
@@ -88,9 +88,9 @@ class CopilotBackupTask(
 
         val monthAgo = LocalDateTime.now().minusDays(60L)
         val baseDirectory = git.repository.workTree
-        val copilots = copilotRepository.findAllByUploadTimeAfterOrDeleteTimeAfter(monthAgo, monthAgo)
-        copilots.forEach { copilot: Copilot ->
-            val level = levelService.findByLevelIdFuzzy(copilot.stageName!!) ?: return@forEach
+        val copilots = copilotKtormRepository.findAllByUploadTimeAfterOrDeleteTimeAfter(monthAgo, monthAgo)
+        copilots.forEach { copilot: CopilotEntity ->
+            val level = levelService.findByLevelIdFuzzy(copilot.stageName) ?: return@forEach
             // 暂时使用 copilotId 作为文件名
             val filePath = File(
                 java.lang.String.join(
@@ -102,7 +102,7 @@ class CopilotBackupTask(
                     copilot.copilotId.toString() + ".json",
                 ),
             )
-            val content = copilot.content ?: return@forEach
+            val content = copilot.content
             if (copilot.delete || copilot.status == CopilotSetStatus.PRIVATE) {
                 // 删除文件
                 deleteCopilot(filePath)

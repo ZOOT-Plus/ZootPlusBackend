@@ -35,7 +35,6 @@ class JsonSchemaMatchValidator : ConstraintValidator<JsonSchemaMatch, String> {
             loadSchema(COPILOT_SCHEMA_JSON),
         )
 
-
         @Suppress("SameParameterValue")
         private fun loadSchema(path: String): Pair<String, JsonSchema> {
             val jsonSchemaFactory = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V202012)
