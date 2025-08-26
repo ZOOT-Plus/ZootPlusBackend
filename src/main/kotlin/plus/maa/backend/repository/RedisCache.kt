@@ -28,7 +28,7 @@ private val log = KotlinLogging.logger { }
  */
 @Component
 class RedisCache(
-    @Value("\${maa-copilot.cache.default-expire}") private val expire: Int,
+    @param:Value($$"${maa-copilot.cache.default-expire}") private val expire: Int,
     private val redisTemplate: StringRedisTemplate,
 ) {
     //  添加 JSR310 模块，以便顺利序列化 LocalDateTime 等类型

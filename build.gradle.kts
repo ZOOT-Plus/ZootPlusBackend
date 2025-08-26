@@ -10,7 +10,7 @@ plugins {
     id("org.hidetake.swagger.generator") version "2.19.2"
     id("com.gorylenko.gradle-git-properties") version "2.5.2"
 
-    val ktVersion = "2.2.0"
+    val ktVersion = "2.2.10"
     kotlin("jvm") version ktVersion
     kotlin("plugin.spring") version ktVersion
     kotlin("kapt") version ktVersion
