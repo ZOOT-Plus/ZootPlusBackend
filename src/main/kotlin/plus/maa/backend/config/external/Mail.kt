@@ -8,5 +8,4 @@ data class Mail(
     var pass: String = "123456789",
     var starttls: Boolean = true,
     var ssl: Boolean = false,
-    var notification: Boolean = true,
 )
