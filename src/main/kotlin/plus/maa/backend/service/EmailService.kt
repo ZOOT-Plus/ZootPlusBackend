@@ -71,7 +71,13 @@ class EmailService(
                 "obj" to vCode,
             )
             val content = FreeMarkerUtils.parseData("mail-includeHtml.ftlh", dataModel)
-            MailUtil.send(mailAccount, listOf(email), subject, content, true)
+            log.info { "try send email to $email" }
+            try {
+                MailUtil.send(mailAccount, listOf(email), subject, content, true)
+            } catch (e: Exception) {
+                log.error(e) { "send email failed, msg: ${e.message}" }
+            }
+            log.info { "send email to $email successfully" }
         }
         // 存redis
         redisCache.setCache("vCodeEmail:$email", vCode, maaCopilotProperties.vcode.expire)

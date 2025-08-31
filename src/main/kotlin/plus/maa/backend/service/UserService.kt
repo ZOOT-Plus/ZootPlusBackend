@@ -1,5 +1,6 @@
 package plus.maa.backend.service
 
+import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
@@ -35,6 +36,7 @@ class UserService(
     private val userDetailService: UserDetailServiceImpl,
     private val jwtService: JwtService,
 ) {
+    private val log = KotlinLogging.logger { }
     /**
      * 登录方法
      *
@@ -226,6 +228,7 @@ class UserService(
         val maaUser = userRepository.findByEmail(regDTO.email)
         if (maaUser != null) {
             // 用户已存在
+            log.info { "send registration token: user exists for email: ${regDTO.email}" }
             throw MaaResultException(MaaStatusCode.MAA_USER_EXISTS)
         }
         // 发送验证码
