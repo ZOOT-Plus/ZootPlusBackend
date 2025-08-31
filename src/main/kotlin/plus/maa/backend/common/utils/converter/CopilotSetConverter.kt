@@ -1,11 +1,10 @@
 package plus.maa.backend.common.utils.converter
 
 import org.mapstruct.Mapper
-import org.mapstruct.Mapping
-import plus.maa.backend.controller.request.copilotset.CopilotSetCreateReq
 import plus.maa.backend.controller.response.copilotset.CopilotSetListRes
 import plus.maa.backend.controller.response.copilotset.CopilotSetRes
-import plus.maa.backend.repository.entity.CopilotSet
+import plus.maa.backend.repository.entity.CopilotSetEntity
+import plus.maa.backend.repository.entity.copilotIdsList
 import java.time.LocalDateTime
 
 /**
@@ -17,14 +16,34 @@ import java.time.LocalDateTime
     imports = [LocalDateTime::class],
 )
 interface CopilotSetConverter {
-    @Mapping(target = "delete", ignore = true)
-    @Mapping(target = "deleteTime", ignore = true)
-    @Mapping(target = "copilotIds", expression = "java(createReq.distinctIdsAndCheck())")
-    @Mapping(target = "createTime", expression = "java(LocalDateTime.now())")
-    @Mapping(target = "updateTime", expression = "java(LocalDateTime.now())")
-    fun convert(createReq: CopilotSetCreateReq, id: Long, creatorId: String): CopilotSet
+    // 旧的CopilotSet相关方法已废弃，转为手动处理
 
-    fun convert(copilotSet: CopilotSet, creator: String): CopilotSetListRes
+    // 手动转换方法用于处理CopilotSetEntity
+    fun convert(copilotSetEntity: CopilotSetEntity, creator: String): CopilotSetListRes {
+        return CopilotSetListRes(
+            id = copilotSetEntity.id,
+            name = copilotSetEntity.name,
+            description = copilotSetEntity.description,
+            creatorId = copilotSetEntity.creatorId,
+            creator = creator,
+            status = copilotSetEntity.status,
+            createTime = copilotSetEntity.createTime,
+            updateTime = copilotSetEntity.updateTime,
+            copilotIds = copilotSetEntity.copilotIdsList,
+        )
+    }
 
-    fun convertDetail(copilotSet: CopilotSet, creator: String): CopilotSetRes
+    fun convertDetail(copilotSetEntity: CopilotSetEntity, creator: String): CopilotSetRes {
+        return CopilotSetRes(
+            id = copilotSetEntity.id,
+            name = copilotSetEntity.name,
+            description = copilotSetEntity.description,
+            copilotIds = copilotSetEntity.copilotIdsList,
+            creatorId = copilotSetEntity.creatorId,
+            creator = creator,
+            createTime = copilotSetEntity.createTime,
+            updateTime = copilotSetEntity.updateTime,
+            status = copilotSetEntity.status,
+        )
+    }
 }

@@ -23,7 +23,7 @@ class ArkLevelSyncTask(
      * 地图数据同步定时任务，每10分钟执行一次
      * 应用启动时自动同步一次
      */
-    @Scheduled(cron = "\${maa-copilot.task-cron.ark-level:-}", zone = "Asia/Shanghai")
+    @Scheduled(cron = $$"${maa-copilot.task-cron.ark-level:-}", zone = "Asia/Shanghai")
     fun syncArkLevels() = atomRun(levelSyncing) {
         arkLevelService.syncLevelData()
     }

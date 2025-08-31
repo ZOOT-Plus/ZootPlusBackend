@@ -10,22 +10,22 @@ import java.time.LocalDateTime
  */
 @Schema(title = "作业集响应")
 data class CopilotSetRes(
-    @Schema(title = "作业集id")
+    @field:Schema(title = "作业集id")
     val id: Long,
-    @Schema(title = "作业集名称")
+    @field:Schema(title = "作业集名称")
     val name: String,
-    @Schema(title = "额外描述")
+    @field:Schema(title = "额外描述")
     val description: String,
-    @Schema(title = "作业id列表")
+    @field:Schema(title = "作业id列表")
     val copilotIds: List<Long>,
-    @Schema(title = "上传者id")
+    @field:Schema(title = "上传者id")
     val creatorId: String,
-    @Schema(title = "上传者昵称")
+    @field:Schema(title = "上传者昵称")
     val creator: String,
-    @Schema(title = "创建时间")
+    @field:Schema(title = "创建时间")
     val createTime: LocalDateTime,
-    @Schema(title = "更新时间")
+    @field:Schema(title = "更新时间")
     val updateTime: LocalDateTime,
-    @Schema(title = "作业状态", enumAsRef = true)
+    @field:Schema(title = "作业状态", enumAsRef = true)
     val status: CopilotSetStatus,
 )

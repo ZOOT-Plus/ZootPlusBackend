@@ -1,26 +1,34 @@
 package plus.maa.backend.service.follow
 
+import org.ktorm.database.Database
+import org.ktorm.dsl.inList
+import org.ktorm.entity.filter
+import org.ktorm.entity.toList
 import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.Pageable
-import org.springframework.data.mongodb.core.MongoTemplate
-import org.springframework.data.mongodb.core.aggregation.Aggregation
-import org.springframework.data.mongodb.core.aggregation.ArrayOperators
-import org.springframework.data.mongodb.core.aggregation.ConvertOperators
-import org.springframework.data.mongodb.core.aggregation.VariableOperators
-import org.springframework.data.mongodb.core.query.Criteria
-import org.springframework.data.mongodb.core.query.Query
-import org.springframework.data.mongodb.core.query.Update
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import plus.maa.backend.controller.response.user.MaaUserInfo
-import plus.maa.backend.repository.entity.MaaUser
-import plus.maa.backend.repository.entity.UserFans
-import plus.maa.backend.repository.entity.UserFollowing
-import java.time.Instant
-import kotlin.reflect.KClass
+import plus.maa.backend.repository.entity.UserEntity
+import plus.maa.backend.repository.entity.UserFansEntity
+import plus.maa.backend.repository.entity.UserFollowingEntity
+import plus.maa.backend.repository.entity.fansList
+import plus.maa.backend.repository.entity.followList
+import plus.maa.backend.repository.entity.setFansList
+import plus.maa.backend.repository.entity.setFollowList
+import plus.maa.backend.repository.entity.users
+import plus.maa.backend.repository.ktorm.UserFansKtormRepository
+import plus.maa.backend.repository.ktorm.UserFollowingKtormRepository
+import plus.maa.backend.repository.ktorm.UserKtormRepository
+import java.time.LocalDateTime
 
 @Service
-class UserFollowService(private val mongoTemplate: MongoTemplate) {
+class UserFollowService(
+    private val database: Database,
+    private val userKtormRepository: UserKtormRepository,
+    private val userFollowingKtormRepository: UserFollowingKtormRepository,
+    private val userFansKtormRepository: UserFansKtormRepository,
+) {
 
     @Transactional
     fun follow(userId: String, followUserId: String) = updateFollowingRel(userId, followUserId, true)
@@ -31,64 +39,108 @@ class UserFollowService(private val mongoTemplate: MongoTemplate) {
     private fun updateFollowingRel(followerId: String, followeeId: String, add: Boolean) {
         val opStr = if (add) "关注" else "取关"
         require(followerId != followeeId) { "不能${opStr}自己" }
-        if (!mongoTemplate.exists(Query.query(Criteria.where("userId").`is`(followeeId)), MaaUser::class.java)) {
+        if (!userKtormRepository.existsById(followeeId)) {
             throw IllegalArgumentException("${opStr}对象不存在")
         }
 
-        updateUserListAndCount(followerId, "followingCount", UserFollowing::class, "followList", add, followeeId)
-        updateUserListAndCount(followeeId, "fansCount", UserFans::class, "fansList", add, followerId)
+        // 更新关注列表
+        updateFollowingList(followerId, followeeId, add)
+        // 更新粉丝列表
+        updateFansList(followeeId, followerId, add)
     }
 
-    private fun <T : Any> updateUserListAndCount(
-        ownerId: String,
-        ownerCountField: String,
-        srcClazz: KClass<T>,
-        srcListField: String,
-        add: Boolean,
-        userId: String,
-    ) {
-        val userIdMatch = Criteria.where("userId").`is`(ownerId)
-        val update = Update().apply {
-            (if (add) ::addToSet else ::pull).invoke(srcListField, userId)
-            set("updatedAt", Instant.now())
+    private fun updateFollowingList(followerId: String, followeeId: String, add: Boolean) {
+        val following = userFollowingKtormRepository.findByUserId(followerId) ?: run {
+            val newFollowing = UserFollowingEntity {
+                this.id = "following_$followerId"
+                this.userId = followerId
+                this.updatedAt = LocalDateTime.now()
+            }
+            newFollowing.setFollowList(mutableListOf())
+            userFollowingKtormRepository.insertEntity(newFollowing)
+            newFollowing
         }
-        mongoTemplate.upsert(Query.query(userIdMatch), update, srcClazz.java)
 
-        val cR = mongoTemplate.aggregate(
-            Aggregation.newAggregation(
-                Aggregation.match(userIdMatch),
-                Aggregation.project().and(ArrayOperators.arrayOf(srcListField).length()).`as`("total"),
-            ),
-            srcClazz.java,
-            CountResult::class.java,
-        ).uniqueMappedResult ?: return
-        mongoTemplate.updateFirst(
-            Query.query(userIdMatch),
-            Update().set(ownerCountField, cR.total),
-            MaaUser::class.java,
-        )
+        val currentList = following.followList.toMutableList()
+        if (add) {
+            if (!currentList.contains(followeeId)) {
+                currentList.add(followeeId)
+            }
+        } else {
+            currentList.remove(followeeId)
+        }
+
+        following.setFollowList(currentList)
+        following.updatedAt = LocalDateTime.now()
+        userFollowingKtormRepository.updateEntity(following)
+
+        // 更新用户关注数量
+        updateFansCount(followerId, currentList)
     }
 
-    fun getFollowingList(userId: String, pageable: Pageable) = getReferredUserPage(userId, UserFollowing::class, "followList", pageable)
+    private fun updateFansList(userId: String, fanId: String, add: Boolean) {
+        val fans = userFansKtormRepository.findByUserId(userId) ?: run {
+            val newFans = UserFansEntity {
+                this.id = "fans_$userId"
+                this.userId = userId
+                this.updatedAt = LocalDateTime.now()
+            }
+            newFans.setFansList(mutableListOf())
+            userFansKtormRepository.insertEntity(newFans)
+            newFans
+        }
 
-    fun getFansList(userId: String, pageable: Pageable) = getReferredUserPage(userId, UserFans::class, "fansList", pageable)
+        val currentList = fans.fansList.toMutableList()
+        if (add) {
+            if (!currentList.contains(fanId)) {
+                currentList.add(fanId)
+            }
+        } else {
+            currentList.remove(fanId)
+        }
 
-    private fun <T : Any> getReferredUserPage(ownerId: String, clazz: KClass<T>, field: String, pageable: Pageable): PageImpl<MaaUserInfo> {
-        val match = Aggregation.match(Criteria.where("userId").`is`(ownerId))
+        fans.setFansList(currentList)
+        fans.updatedAt = LocalDateTime.now()
+        userFansKtormRepository.updateEntity(fans)
 
-        val slice = ArrayOperators.arrayOf(field).slice().offset(pageable.pageNumber * pageable.pageSize).itemCount(pageable.pageSize)
-        val slicedIds = VariableOperators.mapItemsOf(slice).`as`("id").andApply(ConvertOperators.valueOf("id").convertToObjectId())
-        val extractCountAndIds = Aggregation.project().and(ArrayOperators.arrayOf(field).length()).`as`("total").and(slicedIds).`as`("ids")
+        // 更新用户粉丝数量
+        updateFansCount(userId, currentList)
+    }
 
-        val lookupUsers = Aggregation.lookup("maa_user", "ids", "_id", "paged")
+    private fun updateFansCount(userId: String, currentList: MutableList<String>) {
+        val user: UserEntity? = userKtormRepository.findById(userId)
+        user?.let { userEntity: UserEntity ->
+            userEntity.fansCount = currentList.size
+            userKtormRepository.updateEntity(userEntity)
+        }
+    }
 
-        val result = mongoTemplate.aggregate(
-            Aggregation.newAggregation(match, extractCountAndIds, lookupUsers),
-            clazz.java,
-            PagedUserListResult::class.java,
-        ).uniqueMappedResult
+    fun getFollowingList(userId: String, pageable: Pageable): PageImpl<MaaUserInfo> {
+        val following = userFollowingKtormRepository.findByUserId(userId)
+        val followingIds = following?.followList ?: emptyList()
+        return getUserPageFromIds(followingIds, pageable)
+    }
 
-        val userInfos = result?.paged.orEmpty().map(::MaaUserInfo)
-        return PageImpl(userInfos, pageable, result?.total ?: 0L)
+    fun getFansList(userId: String, pageable: Pageable): PageImpl<MaaUserInfo> {
+        val fans = userFansKtormRepository.findByUserId(userId)
+        val fansIds = fans?.fansList ?: emptyList()
+        return getUserPageFromIds(fansIds, pageable)
+    }
+
+    private fun getUserPageFromIds(userIds: List<String>, pageable: Pageable): PageImpl<MaaUserInfo> {
+        val totalCount = userIds.size.toLong()
+        val offset = pageable.pageNumber * pageable.pageSize
+        val limit = pageable.pageSize
+
+        val pagedIds = userIds.drop(offset).take(limit)
+
+        val users = if (pagedIds.isEmpty()) {
+            emptyList()
+        } else {
+            database.users.filter { it.userId inList pagedIds }.toList()
+        }
+
+        val userInfos = users.map { MaaUserInfo(it) }
+        return PageImpl(userInfos, pageable, totalCount)
     }
 }

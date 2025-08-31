@@ -1,28 +1,28 @@
 package plus.maa.backend.service.segment
 
 import io.github.oshai.kotlinlogging.KotlinLogging
+import org.ktorm.database.Database
+import org.ktorm.dsl.eq
+import org.ktorm.entity.filter
+import org.ktorm.entity.forEach
 import org.springframework.beans.factory.InitializingBean
 import org.springframework.context.ApplicationContext
-import org.springframework.data.mongodb.core.MongoTemplate
-import org.springframework.data.mongodb.core.find
-import org.springframework.data.mongodb.core.query.Query
-import org.springframework.data.mongodb.core.query.isEqualTo
 import org.springframework.stereotype.Service
 import org.wltea.analyzer.cfg.Configuration
 import org.wltea.analyzer.cfg.DefaultConfig
 import org.wltea.analyzer.core.IKSegmenter
 import org.wltea.analyzer.dic.Dictionary
 import plus.maa.backend.config.external.MaaCopilotProperties
-import plus.maa.backend.repository.entity.Copilot
+import plus.maa.backend.repository.entity.copilots
 import java.io.StringReader
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 
 @Service
 class SegmentService(
+    private val database: Database,
     private val ctx: ApplicationContext,
     private val properties: MaaCopilotProperties,
-    private val mongoTemplate: MongoTemplate,
 ) : InitializingBean {
 
     private val log = KotlinLogging.logger { }
@@ -75,15 +75,11 @@ class SegmentService(
         val segUpdateAt = Instant.now()
         log.info { "Segments updating start at: $segUpdateAt" }
 
-        val query = Query().apply {
-            fields().include("id", "doc", "copilotId")
-            addCriteria(Copilot::delete isEqualTo false)
-        }
         // small data, fetch all info
-        val fetched = mongoTemplate.find<Copilot>(query)
-
-        fetched.forEach {
-            updateIndex(it.copilotId!!, it.doc?.title, it.doc?.details)
+        database.copilots.filter {
+            it.delete eq false
+        }.forEach {
+            updateIndex(it.copilotId, it.title, it.details)
         }
 
         log.info { "Segments updated: ${INDEX.size}" }
