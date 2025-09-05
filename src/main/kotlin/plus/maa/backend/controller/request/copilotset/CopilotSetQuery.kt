@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.constraints.Max
 import jakarta.validation.constraints.Positive
 import jakarta.validation.constraints.PositiveOrZero
+import org.springframework.web.bind.annotation.BindParam
 
 /**
  * @author dragove
@@ -26,4 +27,8 @@ data class CopilotSetQuery(
     var onlyFollowing: Boolean = false,
     @Schema(title = "需要包含的作业id列表")
     val copilotIds: List<Long>? = null,
+    @Schema(title = "降序排列")
+    val desc: Boolean = true,
+    @Schema(title = "排序字段")
+    @BindParam("order_by") var orderBy: String? = null,
 )
