@@ -23,4 +23,6 @@ interface CopilotSetRepository : MongoRepository<CopilotSet, Long> {
             """,
     )
     fun findByKeyword(keyword: String, pageable: Pageable): Page<CopilotSet>
+
+    fun findAllByDeleteIsFalse(pageable: Pageable): Page<CopilotSet>
 }
