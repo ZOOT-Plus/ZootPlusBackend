@@ -22,6 +22,8 @@ interface CopilotSetConverter {
     @Mapping(target = "copilotIds", expression = "java(createReq.distinctIdsAndCheck())")
     @Mapping(target = "createTime", expression = "java(LocalDateTime.now())")
     @Mapping(target = "updateTime", expression = "java(LocalDateTime.now())")
+    @Mapping(target = "views", constant = "0L")
+    @Mapping(target = "hotScore", constant = "0.0")
     fun convert(createReq: CopilotSetCreateReq, id: Long, creatorId: String): CopilotSet
 
     fun convert(copilotSet: CopilotSet, creator: String): CopilotSetListRes

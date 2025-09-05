@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.PropertyNamingStrategies
 import com.fasterxml.jackson.databind.annotation.JsonNaming
 import org.springframework.data.annotation.Id
 import org.springframework.data.annotation.Transient
+import org.springframework.data.mongodb.core.index.Indexed
 import org.springframework.data.mongodb.core.mapping.Document
 import plus.maa.backend.common.model.CopilotSetType
 import plus.maa.backend.service.model.CopilotSetStatus
@@ -52,6 +53,12 @@ data class CopilotSet(
      * [plus.maa.backend.service.model.CopilotSetStatus]
      */
     var status: CopilotSetStatus,
+    // 查看次数
+    @Indexed
+    var views: Long = 0L,
+    // 热度
+    @Indexed
+    var hotScore: Double = 0.0,
     @field:JsonIgnore var delete: Boolean = false,
     @field:JsonIgnore var deleteTime: LocalDateTime? = null,
 ) : Serializable, CopilotSetType {

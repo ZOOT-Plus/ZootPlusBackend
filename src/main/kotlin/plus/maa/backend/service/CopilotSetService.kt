@@ -24,6 +24,7 @@ import plus.maa.backend.repository.entity.CopilotSet
 import plus.maa.backend.service.model.CopilotSetStatus
 import java.time.LocalDateTime
 import java.util.regex.Pattern
+import plus.maa.backend.common.extensions.blankAsNull
 
 /**
  * @author dragove
@@ -39,7 +40,6 @@ class CopilotSetService(
     private val mongoTemplate: MongoTemplate,
 ) {
     private val log = KotlinLogging.logger { }
-    private val defaultSort: Sort = Sort.by("id").descending()
 
     /**
      * 创建作业集
@@ -115,7 +115,20 @@ class CopilotSetService(
     }
 
     fun query(req: CopilotSetQuery, userId: String?): PagedDTO<CopilotSetListRes> {
-        val pageRequest = PageRequest.of(req.page - 1, req.limit, defaultSort)
+        val sortOrder = Sort.Order(
+            if (req.desc) Sort.Direction.DESC else Sort.Direction.ASC,
+            req.orderBy?.blankAsNull().let { ob ->
+                when (ob) {
+                    "hot" -> "hotScore"
+                    "id" -> "id"
+                    "views" -> "views"
+                    "createTime" -> "createTime"
+                    "updateTime" -> "updateTime"
+                    else -> req.orderBy
+                }
+            } ?: "id",
+        )
+        val pageRequest = PageRequest.of(req.page - 1, req.limit, Sort.by(sortOrder))
 
         val andList = ArrayList<Criteria>()
         val publicCriteria = Criteria.where("status").`is`(CopilotSetStatus.PUBLIC)
