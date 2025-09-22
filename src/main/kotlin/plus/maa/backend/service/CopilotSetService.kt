@@ -23,7 +23,14 @@ import plus.maa.backend.repository.UserFollowingRepository
 import plus.maa.backend.repository.entity.CopilotSet
 import plus.maa.backend.service.model.CopilotSetStatus
 import java.time.LocalDateTime
+import java.time.temporal.ChronoUnit
 import java.util.regex.Pattern
+import kotlin.math.*
+import plus.maa.backend.common.extensions.blankAsNull
+import plus.maa.backend.repository.entity.Copilot
+import plus.maa.backend.repository.RedisCache
+import org.springframework.data.mongodb.core.query.Update
+import java.util.concurrent.TimeUnit
 
 /**
  * @author dragove
@@ -37,9 +44,9 @@ class CopilotSetService(
     private val repository: CopilotSetRepository,
     private val userService: UserService,
     private val mongoTemplate: MongoTemplate,
+    private val redisCache: RedisCache,
 ) {
     private val log = KotlinLogging.logger { }
-    private val defaultSort: Sort = Sort.by("id").descending()
 
     /**
      * 创建作业集
@@ -115,7 +122,20 @@ class CopilotSetService(
     }
 
     fun query(req: CopilotSetQuery, userId: String?): PagedDTO<CopilotSetListRes> {
-        val pageRequest = PageRequest.of(req.page - 1, req.limit, defaultSort)
+        val sortOrder = Sort.Order(
+            if (req.desc) Sort.Direction.DESC else Sort.Direction.ASC,
+            req.orderBy?.blankAsNull().let { ob ->
+                when (ob) {
+                    "hot" -> "hotScore"
+                    "id" -> "id"
+                    "views" -> "views"
+                    "createTime" -> "createTime"
+                    "updateTime" -> "updateTime"
+                    else -> "id"
+                }
+            } ?: "id",
+        )
+        val pageRequest = PageRequest.of(req.page - 1, req.limit, Sort.by(sortOrder))
 
         val andList = ArrayList<Criteria>()
         val publicCriteria = Criteria.where("status").`is`(CopilotSetStatus.PUBLIC)
@@ -176,8 +196,67 @@ class CopilotSetService(
         )
     }
 
-    fun get(id: Long): CopilotSetRes = repository.findById(id).map { copilotSet: CopilotSet ->
+    fun get(id: Long, userIdOrIpAddress: String): CopilotSetRes = repository.findById(id).map { copilotSet: CopilotSet ->
+        // 60分钟内限制同一个用户对访问量的增加
+        val viewCacheKey = "copilot_set_views:$id:$userIdOrIpAddress"
+        val visitResult = redisCache.setCacheIfAbsent(
+            viewCacheKey,
+            VISITED_FLAG,
+            1,
+            TimeUnit.HOURS,
+        )
+
+        if (visitResult) {
+            // 丢到调度队列中, 一致性要求不高
+            Thread.startVirtualThread {
+                val query = Query.query(Criteria.where("id").`is`(id))
+                val update = Update().apply {
+                    inc("views")
+                }
+                mongoTemplate.updateFirst(query, update, CopilotSet::class.java)
+            }
+        }
+
         val userName = userService.findByUserIdOrDefaultInCache(copilotSet.creatorId).userName
         converter.convertDetail(copilotSet, userName)
-    }.orElseThrow { IllegalArgumentException("作业不存在") }
+    }.orElseThrow { IllegalArgumentException("作业集不存在") }
+
+    companion object {
+        private const val VISITED_FLAG = "1"
+
+        /**
+         * 计算作业集热度分数
+         * 基于收录作业的热度、创建时间、浏览量等因素综合计算
+         */
+        fun getHotScore(copilotSet: CopilotSet, copilots: List<Copilot>): Double {
+            val now = LocalDateTime.now()
+            val createTime = copilotSet.createTime
+
+            // 基础分
+            var base = 5.0
+
+            // 时间衰减（相比创建时间过了多少周）
+            val pastedWeeks = ChronoUnit.WEEKS.between(createTime, now) + 1
+            base /= ln((pastedWeeks + 1).toDouble())
+
+            // 收录作业的平均热度分数
+            val avgCopilotScore = if (copilots.isNotEmpty()) {
+                copilots.map { it.hotScore }.average()
+            } else {
+                0.0
+            }
+
+            // 作业数量加成（但有上限，避免无意义堆积）
+            val copilotCountBonus = min(copilots.size.toDouble() / 10.0, 2.0)
+
+            // 浏览量因子
+            val viewsFactor = copilotSet.views / 100.0
+
+            // 综合计算
+            val score = (avgCopilotScore * copilotCountBonus * max(viewsFactor, 1.0)) / pastedWeeks
+            val order = ln(max(score, 1.0))
+
+            return order + score / 1000.0 + base
+        }
+    }
 }
