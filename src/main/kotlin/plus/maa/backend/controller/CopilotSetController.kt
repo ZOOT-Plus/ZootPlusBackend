@@ -42,10 +42,13 @@ class CopilotSetController(
     fun querySets(@RequestBody req: @Valid CopilotSetQuery): MaaResult<PagedDTO<CopilotSetListRes>> =
         success(service.query(req, helper.obtainUserId()))
 
-    @Operation(summary = "查询作业集列表")
-    @ApiResponse(description = "作业集id")
+    @Operation(summary = "查询作业集详情")
+    @ApiResponse(description = "作业集详情")
     @GetMapping("/get")
-    fun getSet(@RequestParam @Parameter(description = "作业id") id: Long): MaaResult<CopilotSetRes> = success(service.get(id))
+    fun getSet(@RequestParam @Parameter(description = "作业集id") id: Long): MaaResult<CopilotSetRes> {
+        val userIdOrIpAddress = helper.obtainUserIdOrIpAddress()
+        return success(service.get(id, userIdOrIpAddress))
+    }
 
     @Operation(summary = "创建作业集")
     @ApiResponse(description = "作业集id")

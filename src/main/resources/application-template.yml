@@ -41,20 +41,30 @@ maa-copilot:
     ark-level: "-"
     copilot-update: "-"
   mail:
-    # 邮件服务器的SMTP地址
-    host: smtp.qq.com
-    # 邮件服务器的SMTP的端口 (qq为465,测试用的qq)
-    port: 465
-    # 发件人（必须正确，否则发送失败）
-    from: 2842775752@qq.com
-    # 用户名(foxmail和qq为发件人邮箱前缀 阿里云邮箱的user是邮箱的完整地址，即xxx@aliyun.com)
-    user: 2842775752
-    # 密码(拿到的授权码)
-    pass: 123456789
-    starttls: true
-    ssl: false
-    #邮件通知
+    # 邮件通知
     notification: true
+  mails:
+    # 邮件服务器的SMTP地址
+    - host: smtp.163.com
+      # 邮件服务器的SMTP的端口 (qq为465,网易为25)
+      port: 25
+      # 发件人（必须正确，否则发送失败）
+      from: user@163.com
+      # 用户名(foxmail和qq为发件人邮箱前缀，阿里云邮箱和网易的user是邮箱的完整地址)
+      user: user@163.com
+      # 密码(拿到的授权码)
+      pass: wysqm
+      starttls: true
+      ssl: false
+    - host: smtp.qq.com
+      # 使用 ssl 的情况，使用STARTTLS时应该为587（未测试）
+      port: 465
+      from: user@qq.com
+      user: user
+      # QQ邮箱的授权码
+      pass: qqsqm
+      ssl: true
+      starttls: false
   copilot:
     min-value-show-not-enough-rating: 50
   sensitive-word:

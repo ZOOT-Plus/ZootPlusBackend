@@ -22,7 +22,9 @@ data class MaaCopilotProperties(
     @NestedConfigurationProperty
     var backup: CopilotBackup = CopilotBackup(),
     @NestedConfigurationProperty
-    var mail: Mail = Mail(),
+    var mail: MailConfig = MailConfig(),
+    @NestedConfigurationProperty
+    var mails: List<Mail> = emptyList(),
     @NestedConfigurationProperty
     var sensitiveWord: SensitiveWord = SensitiveWord(),
     @NestedConfigurationProperty

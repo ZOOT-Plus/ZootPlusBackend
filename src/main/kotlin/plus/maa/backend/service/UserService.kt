@@ -10,6 +10,7 @@ import org.ktorm.entity.firstOrNull
 import org.ktorm.entity.sortedBy
 import org.ktorm.entity.take
 import org.ktorm.entity.toList
+import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Service
@@ -46,6 +47,7 @@ class UserService(
     private val userDetailService: UserDetailServiceImpl,
     private val jwtService: JwtService,
 ) {
+    private val log = KotlinLogging.logger { }
     /**
      * 登录方法
      *
@@ -242,6 +244,7 @@ class UserService(
         val userEntity = userKtormRepository.findByEmail(regDTO.email)
         if (userEntity != null) {
             // 用户已存在
+            log.info { "send registration token: user exists for email: ${regDTO.email}" }
             throw MaaResultException(MaaStatusCode.MAA_USER_EXISTS)
         }
         // 发送验证码

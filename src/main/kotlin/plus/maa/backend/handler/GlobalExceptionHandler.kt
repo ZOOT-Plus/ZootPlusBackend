@@ -102,7 +102,7 @@ class GlobalExceptionHandler {
         request: HttpServletRequest,
     ): MaaResult<Unit> {
         logWarn(request)
-        log.warn(e) { "请求方式错误" }
+        log.warn { "请求方式错误, method: ${request.method} url: ${request.requestURL}" }
         return fail(405, String.format("请求方法不正确:%s", e.message))
     }
 

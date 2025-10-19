@@ -15,6 +15,7 @@ import plus.maa.backend.repository.RedisCache
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * @author LoMu
@@ -23,23 +24,29 @@ import java.util.Locale
 @Service
 class EmailService(
     private val maaCopilotProperties: MaaCopilotProperties,
-    @Value("\${debug.email.no-send:false}")
+    // 测试用 flag，本地测试时可以开启并在控制台查看验证码
+    @param:Value($$"${debug.email.no-send:false}")
     private val flagNoSend: Boolean = false,
     private val redisCache: RedisCache,
     @Resource(name = "emailTaskExecutor")
     private val emailTaskExecutor: AsyncTaskExecutor,
 ) {
     private val log = KotlinLogging.logger { }
-    private val mail = maaCopilotProperties.mail
-    private val mailAccount = MailAccount()
-        .setHost(mail.host)
-        .setPort(mail.port)
-        .setFrom(mail.from)
-        .setUser(mail.user)
-        .setPass(mail.pass)
-        .setSslEnable(mail.ssl)
-        .setStarttlsEnable(mail.starttls)
+    private val mails = maaCopilotProperties.mails
+    private val currentMailIdx = AtomicInteger()
+    private val mailAccounts = mails.map {
+        MailAccount()
+            .setHost(it.host)
+            .setPort(it.port)
+            .setFrom(it.from)
+            .setUser(it.user)
+            .setPass(it.pass)
+            .setSslEnable(it.ssl)
+            .setStarttlsEnable(it.starttls)
+    }
     private val timeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+
+    private fun nextMailAccount() = mailAccounts[currentMailIdx.getAndIncrement() % mailAccounts.size]
 
     /**
      * 发送验证码
@@ -53,13 +60,13 @@ class EmailService(
         val timeout = maaCopilotProperties.vcode.expire / 10
         if (!redisCache.setCacheIfAbsent("HasBeenSentVCode:$email", timeout, timeout)) {
             // 设置失败，说明 key 已存在
-            throw MaaResultException(403, String.format("发送验证码的请求至少需要间隔 %d 秒", timeout))
+            throw MaaResultException(403, "发送验证码的请求至少需要间隔 $timeout 秒")
         }
         // 执行异步任务
-        asyncSendVCode(email)
+        doSendVCode(email)
     }
 
-    private fun asyncSendVCode(email: String) = emailTaskExecutor.execute {
+    private fun doSendVCode(email: String) {
         // 6位随机数验证码
         val vCode = RandomStringUtils.insecure().next(6, true, true).uppercase(Locale.getDefault())
         if (flagNoSend) {
@@ -71,7 +78,14 @@ class EmailService(
                 "obj" to vCode,
             )
             val content = FreeMarkerUtils.parseData("mail-includeHtml.ftlh", dataModel)
-            MailUtil.send(mailAccount, listOf(email), subject, content, true)
+            log.info { "try send email to $email" }
+            try {
+                MailUtil.send(nextMailAccount(), listOf(email), subject, content, true)
+                log.info { "send email to $email successfully" }
+            } catch (e: Exception) {
+                log.error(e) { "send email failed, msg: ${e.message}" }
+                throw IllegalStateException("邮件服务异常，请稍后再试或联系管理员")
+            }
         }
         // 存redis
         redisCache.setCache("vCodeEmail:$email", vCode, maaCopilotProperties.vcode.expire)
@@ -114,6 +128,6 @@ class EmailService(
             "reMessage" to message,
         )
         val content = FreeMarkerUtils.parseData("mail-includeHtml.ftlh", dataModel)
-        MailUtil.send(mailAccount, listOf(receiverEmail), subject, content, true)
+        MailUtil.send(nextMailAccount(), listOf(receiverEmail), subject, content, true)
     }
 }
