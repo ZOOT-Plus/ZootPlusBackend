@@ -21,7 +21,7 @@ data class MaaUser(
 
     companion object {
         val UNKNOWN: MaaUser = MaaUser(
-            userId = "",
+            userId = "0",
             userName = "未知用户:(",
             email = "unknown@unkown.unkown",
             password = "unknown",

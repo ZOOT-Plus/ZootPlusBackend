@@ -66,21 +66,21 @@ class RatingKtormRepository(
     }
 
     override fun findById(id: Any): RatingEntity? {
-        return entities.firstOrNull { it.id eq id.toString() }
+        return entities.firstOrNull { it.id eq (id as Long) }
     }
 
     override fun deleteById(id: Any): Boolean {
-        return entities.removeIf { it.id eq id.toString() } > 0
+        return entities.removeIf { it.id eq (id as Long) } > 0
     }
 
     override fun existsById(id: Any): Boolean {
-        return entities.any { it.id eq id.toString() }
+        return entities.any { it.id eq (id as Long) }
     }
 
     override fun getIdColumn(entity: RatingEntity): Any = entity.id
 
     override fun isNewEntity(entity: RatingEntity): Boolean {
-        return entity.id.isBlank() || !existsById(entity.id)
+        return entity.id == 0L || !existsById(entity.id)
     }
 
     fun insertEntity(entity: RatingEntity): RatingEntity {

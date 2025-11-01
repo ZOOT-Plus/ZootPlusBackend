@@ -23,7 +23,7 @@ data class MaaUserInfo(
         fansCount = user.fansCount,
     )
     constructor(user: UserEntity) : this(
-        id = user.userId,
+        id = user.userId.toString(),
         userName = user.userName,
         activated = user.status == 1,
         followingCount = user.followingCount,

@@ -4,6 +4,7 @@ import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Pageable
 import org.springframework.stereotype.Service
 import plus.maa.backend.common.extensions.requireNotNull
+import plus.maa.backend.common.extensions.toMaaUser
 import plus.maa.backend.controller.request.comments.CommentsAddDTO
 import plus.maa.backend.controller.request.comments.CommentsQueriesDTO
 import plus.maa.backend.controller.request.comments.CommentsRatingDTO
@@ -43,7 +44,7 @@ class CommentsAreaService(
      * @param userId         登录用户 id
      * @param commentsAddDTO CommentsRequest
      */
-    fun addComments(userId: String, commentsAddDTO: CommentsAddDTO) {
+    fun addComments(userId: Long, commentsAddDTO: CommentsAddDTO) {
         sensitiveWordService.validate(commentsAddDTO.message)
         val copilotId = commentsAddDTO.copilotId
         val copilot = copilotKtormRepository.findByCopilotId(copilotId).requireNotNull { "作业不存在" }
@@ -56,14 +57,13 @@ class CommentsAreaService(
             require(commentsAddDTO.message.length <= 150) { "评论内容不可超过150字，请删减" }
         }
 
-        val parentCommentId = commentsAddDTO.fromCommentId?.ifBlank { null }
+        val parentCommentId = commentsAddDTO.fromCommentId
         // 指定了回复对象但该对象不存在时抛出异常
         val parentComment = parentCommentId?.let { id -> requireCommentsAreaById(id) { "回复的评论不存在" } }
 
         notifyRelatedUser(userId, commentsAddDTO.message, copilot, parentComment)
 
         val comment = CommentsAreaEntity {
-            this.id = ""
             this.copilotId = copilotId
             this.uploaderId = userId
             this.fromCommentId = parentComment?.id
@@ -81,7 +81,7 @@ class CommentsAreaService(
         Cache.invalidateCommentCountById(copilotId)
     }
 
-    private fun notifyRelatedUser(replierId: String, message: String, copilot: CopilotEntity, parentComment: CommentsAreaEntity?) {
+    private fun notifyRelatedUser(replierId: Long, message: String, copilot: CopilotEntity, parentComment: CommentsAreaEntity?) {
         if (parentComment?.notification == false) return
         val receiverId = parentComment?.uploaderId ?: copilot.uploaderId
         if (receiverId == replierId) return
@@ -101,7 +101,7 @@ class CommentsAreaService(
         )
     }
 
-    fun deleteComments(userId: String, commentsId: String) {
+    fun deleteComments(userId: Long, commentsId: Long) {
         val commentsArea = requireCommentsAreaById(commentsId)
         // 允许作者删除评论
         val copilot = copilotKtormRepository.findByCopilotId(commentsArea.copilotId)
@@ -111,7 +111,7 @@ class CommentsAreaService(
         commentsArea.delete = true
         commentsArea.deleteTime = now
         // 删除所有回复
-        if (commentsArea.mainCommentId.isNullOrBlank()) {
+        if (commentsArea.mainCommentId == null) {
             val subComments = commentsAreaKtormRepository.findByMainCommentId(commentsId)
             subComments.forEach { ca ->
                 ca.deleteTime = now
@@ -129,13 +129,13 @@ class CommentsAreaService(
      * @param userId            登录用户 id
      * @param commentsRatingDTO CommentsRatingDTO
      */
-    fun rates(userId: String, commentsRatingDTO: CommentsRatingDTO) {
+    fun rates(userId: Long, commentsRatingDTO: CommentsRatingDTO) {
         val commentId = commentsRatingDTO.commentId
         val commentsArea = requireCommentsAreaById(commentId)
 
         val ratingChange = ratingService.rateComment(
             commentId,
-            userId,
+            userId.toString(),
             RatingType.fromRatingType(commentsRatingDTO.rating),
         )
         // 更新评分后更新评论的点赞数
@@ -154,7 +154,7 @@ class CommentsAreaService(
      * @param userId             登录用户 id
      * @param commentsToppingDTO CommentsToppingDTO
      */
-    fun topping(userId: String, commentsToppingDTO: CommentsToppingDTO) {
+    fun topping(userId: Long, commentsToppingDTO: CommentsToppingDTO) {
         val commentsArea = requireCommentsAreaById(commentsToppingDTO.commentId)
         // 只允许作者置顶评论
         val copilot = copilotKtormRepository.findByCopilotId(commentsArea.copilotId)
@@ -176,10 +176,10 @@ class CommentsAreaService(
         val pageable: Pageable = PageRequest.of(page, limit)
 
         // 主评论 - 使用Ktorm查询
-        val mainCommentsPage = if (!request.justSeeId.isNullOrBlank()) {
+        val mainCommentsPage = if (request.justSeeId != null) {
             // 如果指定了评论ID，直接查询该评论
             val comment = commentsAreaKtormRepository.findById(request.justSeeId)
-            if (comment != null && !comment.delete && comment.copilotId == request.copilotId && comment.mainCommentId.isNullOrBlank()) {
+            if (comment != null && !comment.delete && comment.copilotId == request.copilotId && comment.mainCommentId == null) {
                 org.springframework.data.domain.PageImpl(listOf(comment), pageable, 1)
             } else {
                 org.springframework.data.domain.PageImpl(emptyList<CommentsAreaEntity>(), pageable, 0)
@@ -196,7 +196,7 @@ class CommentsAreaService(
         val mainCommentIds = mainCommentsPage.content.mapNotNull { it.id }
         // 获取子评论
         val subCommentsList = if (mainCommentIds.isNotEmpty()) {
-            commentsAreaKtormRepository.findByMainCommentIdIn(mainCommentIds).onEach {
+            commentsAreaKtormRepository.findByMainCommentId(mainCommentIds).onEach {
                 // 将已删除评论内容替换为空
                 if (it.delete) it.message = ""
             }
@@ -204,17 +204,16 @@ class CommentsAreaService(
             emptyList()
         }
 
-        // 获取所有评论用户
-        val allUserIds = (mainCommentsPage.content + subCommentsList).map { it.uploaderId }.distinct()
-        val users = userService.findByUsersId(allUserIds)
         val subCommentGroups = subCommentsList.groupBy { it.mainCommentId }
-
+        val userFetcher = { id: Long ->
+            userService.findByUserIdOrDefaultInCache(id).toMaaUser()
+        }
         // 转换主评论数据并填充用户名
         val commentsInfos = mainCommentsPage.content.map { mainComment ->
             val subCommentsInfos = (subCommentGroups[mainComment.id] ?: emptyList()).map { c ->
-                buildSubCommentsInfo(c, users.getOrDefault(c.uploaderId))
+                buildSubCommentsInfo(c, userFetcher(c.uploaderId))
             }
-            buildMainCommentsInfo(mainComment, users.getOrDefault(mainComment.uploaderId), subCommentsInfos)
+            buildMainCommentsInfo(mainComment, userFetcher(mainComment.uploaderId), subCommentsInfos)
         }
 
         return CommentsAreaInfo(
@@ -231,7 +230,7 @@ class CommentsAreaService(
     private fun buildSubCommentsInfo(c: CommentsAreaEntity, user: MaaUser) = SubCommentsInfo(
         commentId = c.id,
         uploader = user.userName,
-        uploaderId = c.uploaderId,
+        uploaderId = c.uploaderId.toString(),
         message = c.message,
         uploadTime = c.uploadTime,
         like = c.likeCount,
@@ -244,7 +243,7 @@ class CommentsAreaService(
     private fun buildMainCommentsInfo(c: CommentsAreaEntity, user: MaaUser, subList: List<SubCommentsInfo>) = CommentsInfo(
         commentId = c.id,
         uploader = user.userName,
-        uploaderId = c.uploaderId,
+        uploaderId = c.uploaderId.toString(),
         message = c.message,
         uploadTime = c.uploadTime,
         like = c.likeCount,
@@ -253,13 +252,13 @@ class CommentsAreaService(
         subCommentsInfos = subList,
     )
 
-    fun notificationStatus(userId: String, id: String, status: Boolean) {
+    fun notificationStatus(userId: Long, id: Long, status: Boolean) {
         val commentsArea = requireCommentsAreaById(id)
         require(userId == commentsArea.uploaderId) { "您没有权限修改" }
         commentsArea.notification = status
         commentsAreaKtormRepository.updateEntity(commentsArea)
     }
 
-    private fun requireCommentsAreaById(commentsId: String, lazyMessage: () -> Any = { "评论不存在" }): CommentsAreaEntity =
+    private fun requireCommentsAreaById(commentsId: Long, lazyMessage: () -> Any = { "评论不存在" }): CommentsAreaEntity =
         commentsAreaKtormRepository.findById(commentsId)?.takeIf { !it.delete }.requireNotNull(lazyMessage)
 }

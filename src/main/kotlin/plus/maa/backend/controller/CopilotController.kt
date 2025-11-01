@@ -46,7 +46,7 @@ class CopilotController(
     @RequireJwt
     @PostMapping("/upload")
     fun uploadCopilot(@RequestBody @Valid request: CopilotCUDRequest): MaaResult<Long> {
-        return success(copilotService.upload(helper.requireUserId(), request))
+        return success(copilotService.upload(helper.userId, request))
     }
 
     @Operation(summary = "删除作业")
@@ -54,7 +54,7 @@ class CopilotController(
     @RequireJwt
     @PostMapping("/delete")
     fun deleteCopilot(@RequestBody request: CopilotCUDRequest): MaaResult<Unit> {
-        copilotService.delete(helper.requireUserId(), request)
+        copilotService.delete(helper.userId, request)
         return success()
     }
 
@@ -73,7 +73,7 @@ class CopilotController(
     fun queriesCopilot(@ParameterObject parsed: @Valid CopilotQueriesRequest): MaaResult<CopilotPageInfo> {
         // 三秒防抖，缓解前端重复请求问题
         response.setHeader(HttpHeaders.CACHE_CONTROL, "private, max-age=3, must-revalidate")
-        return success(copilotService.queriesCopilot(helper.obtainUserId(), parsed))
+        return success(copilotService.queriesCopilot(helper.obtainUserId()?.toLongOrNull(), parsed))
     }
 
     @Operation(summary = "更新作业")
@@ -81,7 +81,7 @@ class CopilotController(
     @RequireJwt
     @PostMapping("/update")
     fun updateCopilot(@RequestBody @Valid copilotCUDRequest: CopilotCUDRequest): MaaResult<Unit> {
-        copilotService.update(helper.requireUserId(), copilotCUDRequest)
+        copilotService.update(helper.userId, copilotCUDRequest)
         return success()
     }
 
@@ -98,7 +98,7 @@ class CopilotController(
     @ApiResponse(description = "success")
     @GetMapping("/status")
     fun modifyStatus(@RequestParam id: @NotBlank Long, @RequestParam status: Boolean): MaaResult<String> {
-        copilotService.notificationStatus(helper.requireUserId(), id, status)
+        copilotService.notificationStatus(helper.userId, id, status)
         return success("success")
     }
 
@@ -106,7 +106,7 @@ class CopilotController(
     @RequireJwt
     @GetMapping("/ban")
     fun banComments(@RequestParam copilotId: @NotBlank Long, @RequestParam status: CommentStatus): MaaResult<String> {
-        copilotService.commentStatus(helper.requireUserId(), copilotId, status)
+        copilotService.commentStatus(helper.userId, copilotId, status)
         return success("success")
     }
 }

@@ -8,7 +8,7 @@ import java.time.LocalDateTime
  * @author john180
  */
 data class ArkLevel(
-    val id: String? = null,
+    val id: Long? = null,
     val levelId: String? = null,
     val stageId: String? = null,
     // 文件版本, 用于判断是否需要更新

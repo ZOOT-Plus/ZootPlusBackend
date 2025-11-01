@@ -148,13 +148,15 @@ class ArkLevelService(
             val url = "https://raw.githubusercontent.com/${github.repoAndBranch}/${github.tilePosPath}/$fileName"
             val tilePos = getTextAsEntity<ArkTilePos>(url)
             val level = parser.parseLevel(tilePos, tree.sha)
-            checkNotNull(level) { "地图数据解析失败, code: ${tilePos.code}, levelId: ${tilePos.levelId}," +
-                " name: ${tilePos.name}, stageId: ${tilePos.stageId}" }
+            checkNotNull(level) {
+                "地图数据解析失败, code: ${tilePos.code}, levelId: ${tilePos.levelId}," +
+                    " name: ${tilePos.name}, stageId: ${tilePos.stageId}"
+            }
             if (level === ArkLevel.EMPTY) {
                 pass.incrementAndGet()
                 logI { entryInfo(tree.path, "未知类型，跳过") }
             } else {
-                val entity = arkLevelEntityConverter.convertToEntity(level)
+                val entity = arkLevelEntityConverter.convertToEntityWithAutoId(level)
                 withContext(Dispatchers.IO) { arkLevelKtormRepo.save(entity) }
                 success.incrementAndGet()
                 logI { entryInfo(tree.path, "成功") }

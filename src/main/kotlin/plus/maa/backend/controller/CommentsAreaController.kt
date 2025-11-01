@@ -39,7 +39,7 @@ class CommentsAreaController(
     @ApiResponse(description = "发送评论结果")
     @RequireJwt
     fun sendComments(@RequestBody comments: @Valid CommentsAddDTO): MaaResult<String> {
-        commentsAreaService.addComments(authHelper.requireUserId(), comments)
+        commentsAreaService.addComments(authHelper.userId, comments)
         return success("评论成功")
     }
 
@@ -54,7 +54,7 @@ class CommentsAreaController(
     @ApiResponse(description = "评论删除结果")
     @RequireJwt
     fun deleteComments(@RequestBody comments: @Valid CommentsDeleteDTO): MaaResult<String> {
-        commentsAreaService.deleteComments(authHelper.requireUserId(), comments.commentId)
+        commentsAreaService.deleteComments(authHelper.userId, comments.commentId)
         return success("评论已删除")
     }
 
@@ -63,7 +63,7 @@ class CommentsAreaController(
     @RequireJwt
     @PostMapping("/rating")
     fun ratesComments(@RequestBody commentsRatingDTO: @Valid CommentsRatingDTO): MaaResult<String> {
-        commentsAreaService.rates(authHelper.requireUserId(), commentsRatingDTO)
+        commentsAreaService.rates(authHelper.userId, commentsRatingDTO)
         return success("成功")
     }
 
@@ -72,15 +72,15 @@ class CommentsAreaController(
     @RequireJwt
     @PostMapping("/topping")
     fun toppingComments(@RequestBody commentsToppingDTO: @Valid CommentsToppingDTO): MaaResult<String> {
-        commentsAreaService.topping(authHelper.requireUserId(), commentsToppingDTO)
+        commentsAreaService.topping(authHelper.userId, commentsToppingDTO)
         return success("成功")
     }
 
     @Operation(summary = "设置通知接收状态")
     @RequireJwt
     @GetMapping("/status")
-    fun modifyStatus(@RequestParam id: String, @RequestParam status: Boolean): MaaResult<String> {
-        commentsAreaService.notificationStatus(authHelper.requireUserId(), id, status)
+    fun modifyStatus(@RequestParam id: Long, @RequestParam status: Boolean): MaaResult<String> {
+        commentsAreaService.notificationStatus(authHelper.userId, id, status)
         return success("success")
     }
 }

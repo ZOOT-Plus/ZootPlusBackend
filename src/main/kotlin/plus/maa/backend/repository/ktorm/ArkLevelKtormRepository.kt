@@ -56,21 +56,21 @@ class ArkLevelKtormRepository(
     }
 
     override fun findById(id: Any): ArkLevelEntity? {
-        return entities.firstOrNull { it.id eq id.toString() }
+        return entities.firstOrNull { it.id eq (id as Long) }
     }
 
     override fun deleteById(id: Any): Boolean {
-        return entities.removeIf { it.id eq id.toString() } > 0
+        return entities.removeIf { it.id eq (id as Long) } > 0
     }
 
     override fun existsById(id: Any): Boolean {
-        return entities.any { it.id eq id.toString() }
+        return entities.any { it.id eq (id as Long) }
     }
 
     override fun getIdColumn(entity: ArkLevelEntity): Any = entity.id
 
     override fun isNewEntity(entity: ArkLevelEntity): Boolean {
-        return entity.id.isBlank() || !existsById(entity.id)
+        return entity.id == 0L || !existsById(entity.id)
     }
 
     override fun save(entity: ArkLevelEntity): ArkLevelEntity {

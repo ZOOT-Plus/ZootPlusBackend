@@ -24,7 +24,7 @@ interface CopilotEntity : Entity<CopilotEntity> {
     var stageName: String
 
     // 上传者id
-    var uploaderId: String
+    var uploaderId: Long
 
     // 查看次数
     var views: Long
@@ -74,7 +74,7 @@ interface CopilotEntity : Entity<CopilotEntity> {
 object Copilots : Table<CopilotEntity>("copilot") {
     val copilotId = long("copilot_id").primaryKey().bindTo { it.copilotId }
     val stageName = varchar("stage_name").bindTo { it.stageName }
-    val uploaderId = varchar("uploader_id").bindTo { it.uploaderId }
+    val uploaderId = long("uploader_id").bindTo { it.uploaderId }
     val views = long("views").bindTo { it.views }
     val ratingLevel = int("rating_level").bindTo { it.ratingLevel }
     val ratingRatio = double("rating_ratio").bindTo { it.ratingRatio }

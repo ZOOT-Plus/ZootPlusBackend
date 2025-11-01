@@ -39,7 +39,7 @@ fun <E : Any> EntitySequence<E, *>.limitAndOffset(limit: Int, offset: Int): List
 // Entity转换扩展函数
 fun UserEntity.toMaaUser(): MaaUser {
     return MaaUser(
-        userId = this.userId,
+        userId = this.userId.toString(),
         userName = this.userName,
         email = this.email,
         password = this.password,

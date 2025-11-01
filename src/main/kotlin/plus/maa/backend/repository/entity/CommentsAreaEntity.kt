@@ -8,14 +8,13 @@ import org.ktorm.schema.boolean
 import org.ktorm.schema.datetime
 import org.ktorm.schema.long
 import org.ktorm.schema.text
-import org.ktorm.schema.varchar
 import java.time.LocalDateTime
 
 interface CommentsAreaEntity : Entity<CommentsAreaEntity> {
-    var id: String
+    var id: Long
     var copilotId: Long
-    var fromCommentId: String?
-    var uploaderId: String
+    var fromCommentId: Long?
+    var uploaderId: Long
     var message: String
     var likeCount: Long
     var dislikeCount: Long
@@ -23,17 +22,17 @@ interface CommentsAreaEntity : Entity<CommentsAreaEntity> {
     var topping: Boolean
     var delete: Boolean
     var deleteTime: LocalDateTime?
-    var mainCommentId: String?
+    var mainCommentId: Long?
     var notification: Boolean
 
     companion object : Entity.Factory<CommentsAreaEntity>()
 }
 
 object CommentsAreas : Table<CommentsAreaEntity>("comments_area") {
-    val id = varchar("id").primaryKey().bindTo { it.id }
+    val id = long("id").primaryKey().bindTo { it.id }
     val copilotId = long("copilot_id").bindTo { it.copilotId }
-    val fromCommentId = varchar("from_comment_id").bindTo { it.fromCommentId }
-    val uploaderId = varchar("uploader_id").bindTo { it.uploaderId }
+    val fromCommentId = long("from_comment_id").bindTo { it.fromCommentId }
+    val uploaderId = long("uploader_id").bindTo { it.uploaderId }
     val message = text("message").bindTo { it.message }
     val likeCount = long("like_count").bindTo { it.likeCount }
     val dislikeCount = long("dislike_count").bindTo { it.dislikeCount }
@@ -41,7 +40,7 @@ object CommentsAreas : Table<CommentsAreaEntity>("comments_area") {
     val topping = boolean("topping").bindTo { it.topping }
     val delete = boolean("delete").bindTo { it.delete }
     val deleteTime = datetime("delete_time").bindTo { it.deleteTime }
-    val mainCommentId = varchar("main_comment_id").bindTo { it.mainCommentId }
+    val mainCommentId = long("main_comment_id").bindTo { it.mainCommentId }
     val notification = boolean("notification").bindTo { it.notification }
 }
 

@@ -25,7 +25,6 @@ class RatingService(private val ratingKtormRepository: RatingKtormRepository) {
             raterId,
         ) ?: run {
             val newRating = RatingEntity {
-                this.id = ""
                 this.type = keyType
                 this.key = key
                 this.userId = raterId
@@ -68,8 +67,8 @@ class RatingService(private val ratingKtormRepository: RatingKtormRepository) {
         return likeCountChange to dislikeCountChange
     }
 
-    fun rateComment(commentId: String, raterId: String, ratingType: RatingType): Pair<RatingEntity, RatingEntity> =
-        rate(Rating.KeyType.COMMENT, commentId, raterId, ratingType)
+    fun rateComment(commentId: Long, raterId: String, ratingType: RatingType): Pair<RatingEntity, RatingEntity> =
+        rate(Rating.KeyType.COMMENT, commentId.toString(), raterId, ratingType)
 
     fun rateCopilot(copilotId: Long, raterId: String, ratingType: RatingType): Pair<RatingEntity, RatingEntity> =
         rate(Rating.KeyType.COPILOT, copilotId.toString(), raterId, ratingType)

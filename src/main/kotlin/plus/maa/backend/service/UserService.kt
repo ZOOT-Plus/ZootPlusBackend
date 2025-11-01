@@ -1,5 +1,6 @@
 package plus.maa.backend.service
 
+import io.github.oshai.kotlinlogging.KotlinLogging
 import org.ktorm.database.Database
 import org.ktorm.dsl.desc
 import org.ktorm.dsl.eq
@@ -10,7 +11,6 @@ import org.ktorm.entity.firstOrNull
 import org.ktorm.entity.sortedBy
 import org.ktorm.entity.take
 import org.ktorm.entity.toList
-import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Service
@@ -48,6 +48,7 @@ class UserService(
     private val jwtService: JwtService,
 ) {
     private val log = KotlinLogging.logger { }
+
     /**
      * 登录方法
      *
@@ -66,8 +67,8 @@ class UserService(
 
         val maaUser = user.toMaaUser()
         val authorities = userDetailService.collectAuthoritiesFor(maaUser)
-        val authToken = jwtService.issueAuthToken(user.userId, null, authorities)
-        val refreshToken = jwtService.issueRefreshToken(user.userId, null)
+        val authToken = jwtService.issueAuthToken(user.userId.toString(), null, authorities)
+        val refreshToken = jwtService.issueRefreshToken(user.userId.toString(), null)
 
         return MaaLoginRsp(
             authToken.value,
@@ -86,7 +87,7 @@ class UserService(
      * @param userId      当前用户
      * @param rawPassword 新密码
      */
-    fun modifyPassword(userId: String, rawPassword: String, originPassword: String? = null, verifyOriginPassword: Boolean = true) {
+    fun modifyPassword(userId: Long, rawPassword: String, originPassword: String? = null, verifyOriginPassword: Boolean = true) {
         val userEntity = userKtormRepository.findById(userId) ?: return
         val maaUser = userEntity.toMaaUser()
         if (verifyOriginPassword) {
@@ -109,7 +110,7 @@ class UserService(
         }
         userEntity.pwdUpdateTime = Instant.now()
         userKtormRepository.save(userEntity)
-        Cache.invalidateMaaUserById(userId)
+        Cache.invalidateMaaUserById(userId.toString())
     }
 
     /**
@@ -154,7 +155,7 @@ class UserService(
      * @param userId    用户id
      * @param updateDTO 更新参数
      */
-    fun updateUserInfo(userId: String, updateDTO: UserInfoUpdateDTO) {
+    fun updateUserInfo(userId: Long, updateDTO: UserInfoUpdateDTO) {
         val userEntity = userKtormRepository.findById(userId) ?: return
         val newName = updateDTO.userName.trim()
         check(newName.length >= 4) { "用户名长度应在4-24位之间" }
@@ -168,7 +169,7 @@ class UserService(
         }
         userEntity.userName = newName
         userKtormRepository.save(userEntity)
-        Cache.invalidateMaaUserById(userId)
+        Cache.invalidateMaaUserById(userId.toString())
     }
 
     /**
@@ -180,7 +181,7 @@ class UserService(
         try {
             val old = jwtService.verifyAndParseRefreshToken(token)
 
-            val userId = old.subject
+            val userId = old.subject.toLongOrNull() ?: throw NoSuchElementException()
             val userEntity = userKtormRepository.findById(userId) ?: throw NoSuchElementException()
             val user = userEntity.toMaaUser()
             if (old.issuedAt.isBefore(user.pwdUpdateTime)) {
@@ -191,10 +192,10 @@ class UserService(
             val refreshToken = if (ChronoUnit.MINUTES.between(old.issuedAt, Instant.now()) < 5) {
                 old
             } else {
-                jwtService.issueRefreshToken(userId, null)
+                jwtService.issueRefreshToken(userId.toString(), null)
             }
             val authorities = userDetailService.collectAuthoritiesFor(user)
-            val authToken = jwtService.issueAuthToken(userId, null, authorities)
+            val authToken = jwtService.issueAuthToken(userId.toString(), null, authorities)
 
             return MaaLoginRsp(
                 authToken.value,
@@ -251,24 +252,24 @@ class UserService(
         emailService.sendVCode(regDTO.email)
     }
 
-    fun findByUserIdOrDefault(id: String) = database.users.filter { it.userId eq id }.firstOrNull() ?: UserEntity.UNKNOWN
+    fun findByUserIdOrDefault(id: Long) = database.users.filter { it.userId eq id }.firstOrNull() ?: UserEntity.UNKNOWN
 
-    fun findByUserIdOrDefaultInCache(id: String): UserEntity {
-        return Cache.getMaaUserCache(id, ::findByUserIdOrDefault)
+    fun findByUserIdOrDefaultInCache(id: Long): UserEntity {
+        return Cache.getMaaUserCache(id.toString()) { findByUserIdOrDefault(id) }
     }
 
-    fun findByUsersId(ids: Iterable<String>): UserDict {
+    fun findByUsersId(ids: Iterable<Long>): UserDict {
         return userKtormRepository.findAllById(ids).map { it.toMaaUser() }.let { UserDict(it) }
     }
 
     class UserDict(users: List<MaaUser>) {
         private val userMap = users.associateBy { it.userId!! }
         fun entries() = userMap.entries
-        operator fun get(id: String): MaaUser? = userMap[id]
-        fun getOrDefault(id: String) = get(id) ?: MaaUser.UNKNOWN
+        operator fun get(id: Long): MaaUser? = userMap[id.toString()]
+        fun getOrDefault(id: Long) = get(id) ?: MaaUser.UNKNOWN
     }
 
-    fun get(userId: String): MaaUserInfo? = database.users.filter { it.userId eq userId }.firstOrNull()?.run(::MaaUserInfo)
+    fun get(userId: Long): MaaUserInfo? = database.users.filter { it.userId eq userId }.firstOrNull()?.run(::MaaUserInfo)
 
     /**
      * 用户模糊搜索

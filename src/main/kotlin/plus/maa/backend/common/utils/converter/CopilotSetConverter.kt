@@ -16,7 +16,6 @@ import java.time.LocalDateTime
     imports = [LocalDateTime::class],
 )
 interface CopilotSetConverter {
-    // 旧的CopilotSet相关方法已废弃，转为手动处理
 
     // 手动转换方法用于处理CopilotSetEntity
     fun convert(copilotSetEntity: CopilotSetEntity, creator: String): CopilotSetListRes {
@@ -24,7 +23,7 @@ interface CopilotSetConverter {
             id = copilotSetEntity.id,
             name = copilotSetEntity.name,
             description = copilotSetEntity.description,
-            creatorId = copilotSetEntity.creatorId,
+            creatorId = copilotSetEntity.creatorId.toString(),
             creator = creator,
             status = copilotSetEntity.status,
             createTime = copilotSetEntity.createTime,
@@ -39,7 +38,7 @@ interface CopilotSetConverter {
             name = copilotSetEntity.name,
             description = copilotSetEntity.description,
             copilotIds = copilotSetEntity.copilotIdsList,
-            creatorId = copilotSetEntity.creatorId,
+            creatorId = copilotSetEntity.creatorId.toString(),
             creator = creator,
             createTime = copilotSetEntity.createTime,
             updateTime = copilotSetEntity.updateTime,

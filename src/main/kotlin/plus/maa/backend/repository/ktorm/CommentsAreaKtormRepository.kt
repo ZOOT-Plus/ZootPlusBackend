@@ -25,7 +25,7 @@ class CommentsAreaKtormRepository(
     database: Database,
 ) : KtormRepository<CommentsAreaEntity, CommentsAreas>(database, CommentsAreas) {
 
-    fun findByMainCommentId(commentsId: String): List<CommentsAreaEntity> {
+    fun findByMainCommentId(commentsId: Long): List<CommentsAreaEntity> {
         return entities.filter { it.mainCommentId eq commentsId }.toList()
     }
 
@@ -44,54 +44,38 @@ class CommentsAreaKtormRepository(
         return sequence.paginate(pageable)
     }
 
-    fun findByCopilotIdAndUploaderIdAndDeleteAndMainCommentIdExists(
-        copilotId: Long,
-        uploaderId: String,
-        delete: Boolean,
-        exists: Boolean,
-    ): Page<CommentsAreaEntity> {
-        val sequence = entities.filter {
-            it.copilotId eq copilotId and
-                (it.uploaderId eq uploaderId) and
-                (it.delete eq delete) and
-                if (exists) it.mainCommentId.isNotNull() else it.mainCommentId.isNull()
-        }
-
-        return sequence.paginate(Pageable.unpaged())
-    }
-
-    fun findByCopilotIdInAndDelete(copilotIds: Collection<Long>, delete: Boolean): List<CommentsAreaEntity> {
+    fun findByCopilotId(copilotIds: Collection<Long>, delete: Boolean): List<CommentsAreaEntity> {
         return entities.filter {
             it.copilotId inList copilotIds and (it.delete eq delete)
         }.toList()
     }
 
-    fun findByMainCommentIdIn(ids: List<String>): List<CommentsAreaEntity> {
+    fun findByMainCommentId(ids: List<Long>): List<CommentsAreaEntity> {
         return entities.filter { it.mainCommentId inList ids }.toList()
     }
 
-    fun countByCopilotIdAndDelete(copilotId: Long, delete: Boolean): Long {
+    fun countByCopilotId(copilotId: Long, delete: Boolean): Long {
         return entities.filter {
             it.copilotId eq copilotId and (it.delete eq delete)
         }.count().toLong()
     }
 
     override fun findById(id: Any): CommentsAreaEntity? {
-        return entities.firstOrNull { it.id eq id.toString() }
+        return entities.firstOrNull { it.id eq (id as Long) }
     }
 
     override fun deleteById(id: Any): Boolean {
-        return entities.removeIf { it.id eq id.toString() } > 0
+        return entities.removeIf { it.id eq (id as Long) } > 0
     }
 
     override fun existsById(id: Any): Boolean {
-        return entities.any { it.id eq id.toString() }
+        return entities.any { it.id eq (id as Long) }
     }
 
     override fun getIdColumn(entity: CommentsAreaEntity): Any = entity.id
 
     override fun isNewEntity(entity: CommentsAreaEntity): Boolean {
-        return entity.id.isBlank() || !existsById(entity.id)
+        return entity.id == 0L || !existsById(entity.id)
     }
 
     fun insertEntity(entity: CommentsAreaEntity): CommentsAreaEntity {

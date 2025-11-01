@@ -7,11 +7,12 @@ import org.ktorm.schema.Table
 import org.ktorm.schema.boolean
 import org.ktorm.schema.datetime
 import org.ktorm.schema.int
+import org.ktorm.schema.long
 import org.ktorm.schema.varchar
 import java.time.LocalDateTime
 
 interface ArkLevelEntity : Entity<ArkLevelEntity> {
-    var id: String
+    var id: Long
     var levelId: String?
     var stageId: String?
     var sha: String
@@ -26,7 +27,6 @@ interface ArkLevelEntity : Entity<ArkLevelEntity> {
 
     companion object : Entity.Factory<ArkLevelEntity>() {
         val EMPTY: ArkLevelEntity get() = ArkLevelEntity {
-            this.id = ""
             this.sha = ""
             this.width = 0
             this.height = 0
@@ -35,7 +35,7 @@ interface ArkLevelEntity : Entity<ArkLevelEntity> {
 }
 
 object ArkLevels : Table<ArkLevelEntity>("ark_level") {
-    val id = varchar("id").primaryKey().bindTo { it.id }
+    val id = long("id").primaryKey().bindTo { it.id }
     val levelId = varchar("level_id").bindTo { it.levelId }
     val stageId = varchar("stage_id").bindTo { it.stageId }
     val sha = varchar("sha").bindTo { it.sha }

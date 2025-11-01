@@ -21,7 +21,7 @@ interface CopilotSetEntity : Entity<CopilotSetEntity> {
     var name: String
     var description: String
     var copilotIds: String // JSON格式存储作业ID列表
-    var creatorId: String
+    var creatorId: Long
     var createTime: LocalDateTime
     var updateTime: LocalDateTime
     var status: CopilotSetStatus
@@ -35,7 +35,7 @@ object CopilotSets : Table<CopilotSetEntity>("copilot_set") {
     val name = varchar("name").bindTo { it.name }
     val description = text("description").bindTo { it.description }
     val copilotIds = text("copilot_ids").bindTo { it.copilotIds }
-    val creatorId = varchar("creator_id").bindTo { it.creatorId }
+    val creatorId = long("creator_id").bindTo { it.creatorId }
     val createTime = datetime("create_time").bindTo { it.createTime }
     val updateTime = datetime("update_time").bindTo { it.updateTime }
     val status = enum<CopilotSetStatus>("status").bindTo { it.status }
@@ -44,7 +44,6 @@ object CopilotSets : Table<CopilotSetEntity>("copilot_set") {
 
 val Database.copilotSets get() = sequenceOf(CopilotSets)
 
-// 扩展方法用于处理作业ID列表
 private val objectMapper = jacksonObjectMapper()
 
 /**

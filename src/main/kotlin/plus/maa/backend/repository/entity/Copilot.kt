@@ -141,13 +141,4 @@ class Copilot(
         var details: String? = "",
         var detailsColor: String? = "Gray",
     ) : Serializable
-
-    companion object {
-        val META: CollectionMeta<Copilot> =
-            CollectionMeta(
-                { obj: Copilot -> obj.copilotId!! },
-                "copilotId",
-                Copilot::class.java,
-            )
-    }
 }

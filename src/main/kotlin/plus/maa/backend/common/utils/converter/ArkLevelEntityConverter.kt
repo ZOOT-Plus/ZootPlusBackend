@@ -7,9 +7,8 @@ import plus.maa.backend.repository.entity.ArkLevelEntity
 @Component
 class ArkLevelEntityConverter {
 
-    fun convertToEntity(arkLevel: ArkLevel): ArkLevelEntity {
+    fun convertToEntityWithAutoId(arkLevel: ArkLevel): ArkLevelEntity {
         return ArkLevelEntity {
-            this.id = arkLevel.id ?: ""
             this.levelId = arkLevel.levelId
             this.stageId = arkLevel.stageId
             this.sha = arkLevel.sha
@@ -39,13 +38,5 @@ class ArkLevelEntityConverter {
             isOpen = entity.isOpen,
             closeTime = entity.closeTime,
         )
-    }
-
-    fun convertFromEntities(entities: List<ArkLevelEntity>): List<ArkLevel> {
-        return entities.map { convertFromEntity(it) }
-    }
-
-    fun convertToEntities(arkLevels: List<ArkLevel>): List<ArkLevelEntity> {
-        return arkLevels.map { convertToEntity(it) }
     }
 }

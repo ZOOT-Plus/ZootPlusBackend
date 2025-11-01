@@ -50,12 +50,4 @@ data class CopilotSet(
     var status: CopilotSetStatus,
     @field:JsonIgnore var delete: Boolean = false,
     @field:JsonIgnore var deleteTime: LocalDateTime? = null,
-) : Serializable, CopilotSetType {
-    companion object {
-        val meta = CollectionMeta(
-            { obj: CopilotSet -> obj.id },
-            "id",
-            CopilotSet::class.java,
-        )
-    }
-}
+) : Serializable, CopilotSetType

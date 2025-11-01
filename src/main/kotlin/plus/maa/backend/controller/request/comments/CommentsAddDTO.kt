@@ -24,7 +24,7 @@ data class CommentsAddDTO(
     /**
      * 被回复评论的 id
      */
-    val fromCommentId: String? = null,
+    val fromCommentId: Long? = null,
     /**
      * 是否接收通知
      */
