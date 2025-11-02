@@ -26,11 +26,12 @@ interface ArkLevelEntity : Entity<ArkLevelEntity> {
     var closeTime: LocalDateTime?
 
     companion object : Entity.Factory<ArkLevelEntity>() {
-        val EMPTY: ArkLevelEntity get() = ArkLevelEntity {
-            this.sha = ""
-            this.width = 0
-            this.height = 0
-        }
+        val EMPTY: ArkLevelEntity
+            get() = ArkLevelEntity {
+                this.sha = ""
+                this.width = 0
+                this.height = 0
+            }
     }
 }
 

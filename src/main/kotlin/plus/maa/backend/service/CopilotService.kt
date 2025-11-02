@@ -17,7 +17,6 @@ import org.ktorm.dsl.select
 import org.ktorm.dsl.where
 import org.ktorm.entity.drop
 import org.ktorm.entity.filter
-import org.ktorm.entity.firstOrNull
 import org.ktorm.entity.forEach
 import org.ktorm.entity.sortedBy
 import org.ktorm.entity.take
@@ -168,9 +167,7 @@ class CopilotService(
      */
     fun getCopilotById(userIdOrIpAddress: String, id: Long): CopilotInfo? {
         val result = Cache.getCopilotCache(id) {
-            database.copilots.filter { copilot ->
-                (copilot.copilotId eq id) and (copilot.delete eq false)
-            }.firstOrNull()?.run {
+            copilotKtormRepository.findNotDeletedCopilotId(id)?.run {
                 CopilotInnerCacheInfo(this.copy())
             }
         }?.let {

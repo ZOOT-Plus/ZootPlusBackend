@@ -14,6 +14,7 @@ import org.ktorm.entity.toList
 import org.springframework.stereotype.Repository
 import plus.maa.backend.repository.entity.CopilotEntity
 import plus.maa.backend.repository.entity.Copilots
+import plus.maa.backend.repository.entity.copilots
 import java.time.LocalDateTime
 
 @Repository
@@ -21,6 +22,7 @@ class CopilotKtormRepository(
     database: Database,
 ) : KtormRepository<CopilotEntity, Copilots>(database, Copilots) {
 
+    fun getNotDeletedQuery() = database.copilots.filter { it.delete eq false }
     fun findNotDeletedCopilotId(copilotId: Long): CopilotEntity? {
         return entities.firstOrNull {
             it.copilotId eq copilotId and (it.delete eq false)
