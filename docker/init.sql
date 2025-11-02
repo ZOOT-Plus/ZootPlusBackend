@@ -153,7 +153,7 @@ create table if not exists copilot_set
     primary key,
   name        text                            not null,
   description text                            not null,
-  copilot_ids text                            not null,
+  copilot_ids json                            not null,
   creator_id  bigint                          not null,
   create_time timestamp(3)                    not null,
   update_time timestamp(3)                    not null,

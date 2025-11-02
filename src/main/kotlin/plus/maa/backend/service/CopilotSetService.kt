@@ -23,10 +23,8 @@ import plus.maa.backend.controller.request.copilotset.CopilotSetUpdateReq
 import plus.maa.backend.controller.response.copilotset.CopilotSetListRes
 import plus.maa.backend.controller.response.copilotset.CopilotSetRes
 import plus.maa.backend.repository.entity.CopilotSetEntity
-import plus.maa.backend.repository.entity.copilotIdsList
 import plus.maa.backend.repository.entity.copilotSets
-import plus.maa.backend.repository.entity.distinctIdsAndCheck
-import plus.maa.backend.repository.entity.setCopilotIdsList
+import plus.maa.backend.repository.entity.setCopilotIdsWithCheck
 import plus.maa.backend.repository.ktorm.CopilotSetKtormRepository
 import plus.maa.backend.service.model.CopilotSetStatus
 import java.time.LocalDateTime
@@ -63,7 +61,7 @@ class CopilotSetService(
             this.status = req.status
             this.delete = false
         }
-        entity.setCopilotIdsList(req.copilotIds)
+        entity.setCopilotIdsWithCheck(req.copilotIds)
 
         copilotSetKtormRepository.insertEntity(entity)
         return entity.id
@@ -75,9 +73,9 @@ class CopilotSetService(
     fun addCopilotIds(req: CopilotSetModCopilotsReq, userId: Long) {
         val copilotSet = copilotSetKtormRepository.findByIdAsOptional(req.id).orElseThrow { IllegalArgumentException("作业集不存在") }
         Assert.state(copilotSet.creatorId == userId, "您不是该作业集的创建者，无权修改该作业集")
-        val currentIds = copilotSet.copilotIdsList
+        val currentIds = HashSet(copilotSet.copilotIds)
         currentIds.addAll(req.copilotIds)
-        copilotSet.setCopilotIdsList(copilotSet.distinctIdsAndCheck())
+        copilotSet.setCopilotIdsWithCheck(currentIds)
         copilotSetKtormRepository.updateEntity(copilotSet)
     }
 
@@ -88,9 +86,9 @@ class CopilotSetService(
         val copilotSet = copilotSetKtormRepository.findByIdAsOptional(req.id).orElseThrow { IllegalArgumentException("作业集不存在") }
         Assert.state(copilotSet.creatorId == userId, "您不是该作业集的创建者，无权修改该作业集")
         val removeIds: Set<Long> = HashSet(req.copilotIds)
-        val currentIds = copilotSet.copilotIdsList
-        currentIds.removeIf { o: Long -> removeIds.contains(o) }
-        copilotSet.setCopilotIdsList(currentIds)
+        val currentIds = HashSet(copilotSet.copilotIds)
+        currentIds.removeAll(removeIds)
+        copilotSet.setCopilotIdsWithCheck(currentIds)
         copilotSetKtormRepository.updateEntity(copilotSet)
     }
 
@@ -110,8 +108,7 @@ class CopilotSetService(
             copilotSet.status = req.status
         }
         if (req.copilotIds != null) {
-            copilotSet.setCopilotIdsList(req.copilotIds)
-            copilotSet.distinctIdsAndCheck()
+            copilotSet.setCopilotIdsWithCheck(req.copilotIds)
         }
         copilotSet.updateTime = LocalDateTime.now()
         copilotSetKtormRepository.updateEntity(copilotSet)
@@ -170,14 +167,15 @@ class CopilotSetService(
             }
         }
 
-        // 作业ID过滤（这个需要特殊处理，因为copilotIds是JSON字符串）
+        // 作业ID过滤
         var copilotSets = sequence.sortedBy { it.id }.drop(offset).take(limit).toList()
 
         // 如果有copilotIds过滤条件，需要在内存中过滤
         if (!req.copilotIds.isNullOrEmpty()) {
+            val requiredIds = req.copilotIds.toSet()
             copilotSets = copilotSets.filter { entity ->
-                val entityCopilotIds = entity.copilotIdsList
-                req.copilotIds.all { entityCopilotIds.contains(it) }
+                val entityIds = entity.copilotIds.toSet()
+                entityIds.containsAll(requiredIds)
             }
         }
 

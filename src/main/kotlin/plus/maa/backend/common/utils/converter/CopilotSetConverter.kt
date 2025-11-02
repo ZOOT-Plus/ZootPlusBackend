@@ -4,7 +4,6 @@ import org.mapstruct.Mapper
 import plus.maa.backend.controller.response.copilotset.CopilotSetListRes
 import plus.maa.backend.controller.response.copilotset.CopilotSetRes
 import plus.maa.backend.repository.entity.CopilotSetEntity
-import plus.maa.backend.repository.entity.copilotIdsList
 import java.time.LocalDateTime
 
 /**
@@ -28,7 +27,7 @@ interface CopilotSetConverter {
             status = copilotSetEntity.status,
             createTime = copilotSetEntity.createTime,
             updateTime = copilotSetEntity.updateTime,
-            copilotIds = copilotSetEntity.copilotIdsList,
+            copilotIds = copilotSetEntity.copilotIds,
         )
     }
 
@@ -37,7 +36,7 @@ interface CopilotSetConverter {
             id = copilotSetEntity.id,
             name = copilotSetEntity.name,
             description = copilotSetEntity.description,
-            copilotIds = copilotSetEntity.copilotIdsList,
+            copilotIds = copilotSetEntity.copilotIds,
             creatorId = copilotSetEntity.creatorId.toString(),
             creator = creator,
             createTime = copilotSetEntity.createTime,

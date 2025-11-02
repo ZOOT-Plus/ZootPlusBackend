@@ -1,10 +1,10 @@
 package plus.maa.backend.repository.entity
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
-import com.fasterxml.jackson.module.kotlin.readValue
 import org.ktorm.database.Database
 import org.ktorm.entity.Entity
 import org.ktorm.entity.sequenceOf
+import org.ktorm.jackson.json
 import org.ktorm.schema.Table
 import org.ktorm.schema.boolean
 import org.ktorm.schema.datetime
@@ -20,7 +20,7 @@ interface CopilotSetEntity : Entity<CopilotSetEntity> {
     var id: Long
     var name: String
     var description: String
-    var copilotIds: String // JSON格式存储作业ID列表
+    var copilotIds: List<Long> // JSON格式存储作业ID列表
     var creatorId: Long
     var createTime: LocalDateTime
     var updateTime: LocalDateTime
@@ -34,7 +34,7 @@ object CopilotSets : Table<CopilotSetEntity>("copilot_set") {
     val id = long("id").primaryKey().bindTo { it.id }
     val name = varchar("name").bindTo { it.name }
     val description = text("description").bindTo { it.description }
-    val copilotIds = text("copilot_ids").bindTo { it.copilotIds }
+    val copilotIds = json<List<Long>>("copilot_ids", objectMapper).bindTo { it.copilotIds }
     val creatorId = long("creator_id").bindTo { it.creatorId }
     val createTime = datetime("create_time").bindTo { it.createTime }
     val updateTime = datetime("update_time").bindTo { it.updateTime }
@@ -47,36 +47,17 @@ val Database.copilotSets get() = sequenceOf(CopilotSets)
 private val objectMapper = jacksonObjectMapper()
 
 /**
- * 获取作业ID列表（从JSON字符串解析）
- */
-val CopilotSetEntity.copilotIdsList: MutableList<Long>
-    get() = try {
-        if (copilotIds.isBlank()) {
-            mutableListOf()
-        } else {
-            objectMapper.readValue<MutableList<Long>>(copilotIds)
-        }
-    } catch (e: Exception) {
-        mutableListOf()
-    }
-
-/**
  * 设置作业ID列表（序列化为JSON字符串）
  */
-fun CopilotSetEntity.setCopilotIdsList(ids: List<Long>) {
-    copilotIds = objectMapper.writeValueAsString(ids)
-}
-
-/**
- * 去重并检查作业ID列表，类似原有的distinctIdsAndCheck方法
- */
-fun CopilotSetEntity.distinctIdsAndCheck(): MutableList<Long> {
-    val currentIds = copilotIdsList
-    if (currentIds.isEmpty() || currentIds.size == 1) {
-        return currentIds
+fun CopilotSetEntity.setCopilotIdsWithCheck(ids: Collection<Long>) {
+    val result = when {
+        ids.isEmpty() || ids.size == 1 -> ids
+        else -> {
+            val distinctIds = HashSet(ids)
+            Assert.state(distinctIds.size <= 1000, "作业集总作业数量不能超过1000条")
+            distinctIds
+        }
     }
-    val distinctIds = currentIds.stream().distinct().toList()
-    Assert.state(distinctIds.size <= 1000, "作业集总作业数量不能超过1000条")
-    setCopilotIdsList(distinctIds)
-    return distinctIds.toMutableList()
+
+    copilotIds = result.toList()
 }
