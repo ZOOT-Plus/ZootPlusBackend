@@ -53,7 +53,7 @@ fun CopilotSetEntity.setCopilotIdsWithCheck(ids: Collection<Long>) {
     val result = when {
         ids.isEmpty() || ids.size == 1 -> ids
         else -> {
-            val distinctIds = HashSet(ids)
+            val distinctIds = LinkedHashSet(ids)
             Assert.state(distinctIds.size <= 1000, "作业集总作业数量不能超过1000条")
             distinctIds
         }

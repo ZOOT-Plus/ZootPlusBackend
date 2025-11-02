@@ -73,7 +73,7 @@ class CopilotSetService(
     fun addCopilotIds(req: CopilotSetModCopilotsReq, userId: Long) {
         val copilotSet = copilotSetKtormRepository.findByIdAsOptional(req.id).orElseThrow { IllegalArgumentException("作业集不存在") }
         Assert.state(copilotSet.creatorId == userId, "您不是该作业集的创建者，无权修改该作业集")
-        val currentIds = HashSet(copilotSet.copilotIds)
+        val currentIds = LinkedHashSet(copilotSet.copilotIds)
         currentIds.addAll(req.copilotIds)
         copilotSet.setCopilotIdsWithCheck(currentIds)
         copilotSetKtormRepository.updateEntity(copilotSet)
@@ -86,7 +86,7 @@ class CopilotSetService(
         val copilotSet = copilotSetKtormRepository.findByIdAsOptional(req.id).orElseThrow { IllegalArgumentException("作业集不存在") }
         Assert.state(copilotSet.creatorId == userId, "您不是该作业集的创建者，无权修改该作业集")
         val removeIds: Set<Long> = HashSet(req.copilotIds)
-        val currentIds = HashSet(copilotSet.copilotIds)
+        val currentIds = LinkedHashSet(copilotSet.copilotIds)
         currentIds.removeAll(removeIds)
         copilotSet.setCopilotIdsWithCheck(currentIds)
         copilotSetKtormRepository.updateEntity(copilotSet)
