@@ -435,8 +435,6 @@ class CopilotService(
         val infos = copilots.map { copilot ->
             val contentObj = objectMapper.readTree(copilot.content) as ObjectNode
             contentObj.remove("actions")
-            contentObj.remove("minimum_required")
-            contentObj.remove("stage_name")
             copilot.content = contentObj.toString()
 
             copilot.format(
