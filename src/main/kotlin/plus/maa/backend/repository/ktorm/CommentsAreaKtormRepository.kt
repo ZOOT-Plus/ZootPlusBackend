@@ -46,7 +46,7 @@ class CommentsAreaKtormRepository(
 
     fun findByCopilotId(copilotIds: Collection<Long>, delete: Boolean): List<CommentsAreaEntity> {
         return entities.filter {
-            it.copilotId inList copilotIds and (it.delete eq delete)
+            (it.copilotId inList copilotIds) and (it.delete eq delete)
         }.toList()
     }
 

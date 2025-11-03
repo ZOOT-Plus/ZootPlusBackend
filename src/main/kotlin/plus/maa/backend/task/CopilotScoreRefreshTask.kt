@@ -92,8 +92,7 @@ class CopilotScoreRefreshTask(
         }
 
         val copilots = database.copilots.filter {
-            it.copilotId inList copilotIds and
-                it.delete eq false
+            (it.copilotId inList copilotIds) and (it.delete eq false)
         }.toList()
         if (copilots.isEmpty()) {
             return
