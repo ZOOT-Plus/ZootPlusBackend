@@ -17,12 +17,21 @@ create index if not exists idx_user_user_name
 create unique index if not exists idx_user_user_email
   on "user" (email);
 
+create table if not exists "user_follow"
+(
+  user_id        bigint,
+  follow_user_id bigint       not null,
+  updated_at     timestamp(3) not null,
+  primary key (user_id, follow_user_id)
+);
+
+
 create table if not exists copilot
 (
   copilot_id        bigserial
     primary key,
   stage_name        text                         not null,
-  uploader_id       bigint                        not null,
+  uploader_id       bigint                       not null,
   views             bigint                       not null,
   rating_level      integer                      not null,
   rating_ratio      double precision             not null,
@@ -83,18 +92,18 @@ create table if not exists comments_area
 (
   id              bigserial
     primary key,
-  copilot_id      bigint                      not null,
+  copilot_id      bigint                not null,
   from_comment_id bigint,
-  uploader_id     bigint                      not null,
-  message         text                        not null,
-  like_count      bigint    default 0         not null,
-  dislike_count   bigint    default 0         not null,
-  upload_time     timestamp(3)                not null,
-  topping         boolean   default false     not null,
-  delete          boolean   default false     not null,
+  uploader_id     bigint                not null,
+  message         text                  not null,
+  like_count      bigint  default 0     not null,
+  dislike_count   bigint  default 0     not null,
+  upload_time     timestamp(3)          not null,
+  topping         boolean default false not null,
+  delete          boolean default false not null,
   delete_time     timestamp(3),
   main_comment_id bigint,
-  notification    boolean   default false     not null
+  notification    boolean default false not null
 );
 
 comment on table comments_area is '评论区表';
@@ -151,14 +160,14 @@ create table if not exists copilot_set
 (
   id          bigserial
     primary key,
-  name        text                            not null,
-  description text                            not null,
-  copilot_ids json                            not null,
-  creator_id  bigint                          not null,
-  create_time timestamp(3)                    not null,
-  update_time timestamp(3)                    not null,
-  status      text      default 'PUBLIC'::text not null,
-  delete      boolean   default false         not null
+  name        text                           not null,
+  description text                           not null,
+  copilot_ids json                           not null,
+  creator_id  bigint                         not null,
+  create_time timestamp(3)                   not null,
+  update_time timestamp(3)                   not null,
+  status      text    default 'PUBLIC'::text not null,
+  delete      boolean default false          not null
 );
 
 comment on table copilot_set is '作业集表';
@@ -220,13 +229,13 @@ create table if not exists ark_level
     primary key,
   level_id   text,
   stage_id   text,
-  sha        text         not null,
+  sha        text    not null,
   cat_one    text,
   cat_two    text,
   cat_three  text,
   name       text,
-  width      integer      not null,
-  height     integer      not null,
+  width      integer not null,
+  height     integer not null,
   is_open    boolean,
   close_time timestamp(3)
 );

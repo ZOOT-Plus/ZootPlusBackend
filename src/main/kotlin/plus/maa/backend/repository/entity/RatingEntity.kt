@@ -1,8 +1,6 @@
 package plus.maa.backend.repository.entity
 
-import org.ktorm.database.Database
 import org.ktorm.entity.Entity
-import org.ktorm.entity.sequenceOf
 import org.ktorm.schema.Table
 import org.ktorm.schema.datetime
 import org.ktorm.schema.enum
@@ -30,5 +28,3 @@ object Ratings : Table<RatingEntity>("rating") {
     val rating = enum<RatingType>("rating").bindTo { it.rating }
     val rateTime = datetime("rate_time").bindTo { it.rateTime }
 }
-
-val Database.ratings get() = sequenceOf(Ratings)

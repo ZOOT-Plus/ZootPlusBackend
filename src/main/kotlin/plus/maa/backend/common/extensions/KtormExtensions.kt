@@ -8,6 +8,7 @@ import org.ktorm.entity.toList
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.Pageable
+import plus.maa.backend.controller.response.user.MaaUserInfo
 import plus.maa.backend.repository.entity.MaaUser
 import plus.maa.backend.repository.entity.UserEntity
 
@@ -45,6 +46,15 @@ fun UserEntity.toMaaUser(): MaaUser {
         password = this.password,
         status = this.status,
         pwdUpdateTime = this.pwdUpdateTime,
+        followingCount = this.followingCount,
+        fansCount = this.fansCount,
+    )
+}
+
+fun UserEntity.toMaaUserInfo(): MaaUserInfo {
+    return MaaUserInfo(
+        id = this.userId.toString(),
+        userName = this.userName,
         followingCount = this.followingCount,
         fansCount = this.fansCount,
     )
