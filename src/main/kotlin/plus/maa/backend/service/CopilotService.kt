@@ -45,6 +45,7 @@ import plus.maa.backend.repository.entity.CopilotEntity
 import plus.maa.backend.repository.entity.Operators
 import plus.maa.backend.repository.entity.RatingEntity
 import plus.maa.backend.repository.entity.UserEntity
+import plus.maa.backend.repository.entity.UserFollows
 import plus.maa.backend.repository.entity.copilots
 import plus.maa.backend.repository.entity.users
 import plus.maa.backend.repository.ktorm.CommentsAreaKtormRepository
@@ -244,9 +245,6 @@ class CopilotService(
         val levelKeyword = request.levelKeyword
 
         var inUserIds: List<Long>? = null
-        if (request.onlyFollowing && userId != null) {
-            // TODO FOLLOW功能 issue195
-        }
 
         val uploaderId = if (request.uploaderId == ME) {
             userId
@@ -339,6 +337,11 @@ class CopilotService(
             }
             if (inCopilotIds != null) {
                 conditions += it.copilotId inList inCopilotIds
+            }
+            if (request.onlyFollowing && userId != null) {
+                conditions += it.uploaderId inList (database.from(UserFollows)
+                    .select(UserFollows.followUserId)
+                    .where { UserFollows.userId eq userId })
             }
             if (includeOps != null) {
                 conditions += it.copilotId inList (

@@ -4,8 +4,12 @@ import cn.hutool.core.lang.Assert
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.ktorm.database.Database
 import org.ktorm.dsl.eq
+import org.ktorm.dsl.from
+import org.ktorm.dsl.inList
 import org.ktorm.dsl.like
 import org.ktorm.dsl.or
+import org.ktorm.dsl.select
+import org.ktorm.dsl.where
 import org.ktorm.entity.count
 import org.ktorm.entity.drop
 import org.ktorm.entity.filter
@@ -23,6 +27,7 @@ import plus.maa.backend.controller.request.copilotset.CopilotSetUpdateReq
 import plus.maa.backend.controller.response.copilotset.CopilotSetListRes
 import plus.maa.backend.controller.response.copilotset.CopilotSetRes
 import plus.maa.backend.repository.entity.CopilotSetEntity
+import plus.maa.backend.repository.entity.UserFollows
 import plus.maa.backend.repository.entity.copilotSets
 import plus.maa.backend.repository.entity.setCopilotIdsWithCheck
 import plus.maa.backend.repository.ktorm.CopilotSetKtormRepository
@@ -146,7 +151,11 @@ class CopilotSetService(
 
         // 只关注的用户
         if (req.onlyFollowing && userId != null) {
-            // TODO FOLLOW功能 issue195
+            sequence = sequence.filter {
+                it.creatorId inList (database.from(UserFollows)
+                    .select(UserFollows.followUserId)
+                    .where { UserFollows.userId eq userId })
+            }
         }
 
         // 创建者过滤
