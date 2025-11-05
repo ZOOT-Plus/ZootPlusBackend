@@ -19,6 +19,7 @@ import org.ktorm.entity.toList
 import org.springframework.stereotype.Service
 import plus.maa.backend.common.Constants.ME
 import plus.maa.backend.common.controller.PagedDTO
+import plus.maa.backend.common.extensions.containsJson
 import plus.maa.backend.common.utils.converter.CopilotSetConverter
 import plus.maa.backend.controller.request.copilotset.CopilotSetCreateReq
 import plus.maa.backend.controller.request.copilotset.CopilotSetModCopilotsReq
@@ -152,9 +153,11 @@ class CopilotSetService(
         // 只关注的用户
         if (req.onlyFollowing && userId != null) {
             sequence = sequence.filter {
-                it.creatorId inList (database.from(UserFollows)
-                    .select(UserFollows.followUserId)
-                    .where { UserFollows.userId eq userId })
+                it.creatorId inList (
+                    database.from(UserFollows)
+                        .select(UserFollows.followUserId)
+                        .where { UserFollows.userId eq userId }
+                    )
             }
         }
 
@@ -176,27 +179,25 @@ class CopilotSetService(
             }
         }
 
-        // 作业ID过滤
-        var copilotSets = sequence.sortedBy { it.id }.drop(offset).take(limit).toList()
-
-        // 如果有copilotIds过滤条件，需要在内存中过滤
         if (!req.copilotIds.isNullOrEmpty()) {
             val requiredIds = req.copilotIds.toSet()
-            copilotSets = copilotSets.filter { entity ->
-                val entityIds = entity.copilotIds.toSet()
-                entityIds.containsAll(requiredIds)
+            sequence = sequence.filter {
+                it.copilotIds containsJson requiredIds
             }
         }
+
+        val copilotSets = sequence
+            .sortedBy { it.id }
+            .drop(offset)
+            .take(limit)
+            .toList()
 
         val totalCount = sequence.count().toLong()
         val hasNext = (offset + limit) < totalCount
         val totalPages = ((totalCount + limit - 1) / limit).toInt()
 
-        val userIds = copilotSets.map { entity -> entity.creatorId }.distinct()
-        val userById = userService.findByUsersId(userIds)
-
         val results = copilotSets.map { cs ->
-            val user = userById.getOrDefault(cs.creatorId)
+            val user = userService.findByUserIdOrDefaultInCache(cs.creatorId)
             converter.convert(cs, user.userName)
         }
 

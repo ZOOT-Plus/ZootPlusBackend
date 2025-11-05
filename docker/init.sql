@@ -162,7 +162,7 @@ create table if not exists copilot_set
     primary key,
   name        text                           not null,
   description text                           not null,
-  copilot_ids json                           not null,
+  copilot_ids jsonb                          not null,
   creator_id  bigint                         not null,
   create_time timestamp(3)                   not null,
   update_time timestamp(3)                   not null,
@@ -186,41 +186,6 @@ create index if not exists idx_copilot_set_creator_id
 create index if not exists idx_copilot_set_status
   on copilot_set (status);
 
--- 用户关注表
-create table if not exists user_following
-(
-  id            text         not null
-    primary key,
-  user_id       bigint       not null,
-  following_ids text         not null,
-  updated_at    timestamp(3) not null
-);
-
-comment on table user_following is '用户关注表';
-comment on column user_following.user_id is '关注者用户ID';
-comment on column user_following.following_ids is 'JSON格式存储的关注列表';
-comment on column user_following.updated_at is '更新时间';
-
-create unique index if not exists idx_user_following_user_id
-  on user_following (user_id);
-
--- 用户粉丝表
-create table if not exists user_fans
-(
-  id         text         not null
-    primary key,
-  user_id    bigint       not null,
-  fans_ids   text         not null,
-  updated_at timestamp(3) not null
-);
-
-comment on table user_fans is '用户粉丝表';
-comment on column user_fans.user_id is '被关注者用户ID';
-comment on column user_fans.fans_ids is 'JSON格式存储的粉丝列表';
-comment on column user_fans.updated_at is '更新时间';
-
-create unique index if not exists idx_user_fans_user_id
-  on user_fans (user_id);
 
 -- 关卡表
 create table if not exists ark_level

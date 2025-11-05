@@ -11,7 +11,10 @@ import javax.sql.DataSource
 class KtormConfig(val dataSource: DataSource) {
     @Bean
     fun database(): Database {
-        return Database.connectWithSpringSupport(dataSource)
+        return Database.connectWithSpringSupport(
+            dataSource = dataSource,
+            dialect = JsonbPostgreSqlDialect,
+        )
     }
 
     @Bean

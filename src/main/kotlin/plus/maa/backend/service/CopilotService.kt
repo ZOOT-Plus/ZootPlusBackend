@@ -339,9 +339,11 @@ class CopilotService(
                 conditions += it.copilotId inList inCopilotIds
             }
             if (request.onlyFollowing && userId != null) {
-                conditions += it.uploaderId inList (database.from(UserFollows)
-                    .select(UserFollows.followUserId)
-                    .where { UserFollows.userId eq userId })
+                conditions += it.uploaderId inList (
+                    database.from(UserFollows)
+                        .select(UserFollows.followUserId)
+                        .where { UserFollows.userId eq userId }
+                    )
             }
             if (includeOps != null) {
                 conditions += it.copilotId inList (

@@ -1,10 +1,15 @@
 package plus.maa.backend.common.extensions
 
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import org.ktorm.entity.EntitySequence
 import org.ktorm.entity.count
 import org.ktorm.entity.drop
 import org.ktorm.entity.take
 import org.ktorm.entity.toList
+import org.ktorm.expression.ScalarExpression
+import org.ktorm.schema.BooleanSqlType
+import org.ktorm.schema.ColumnDeclaring
+import org.ktorm.schema.SqlType
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.Pageable
@@ -58,4 +63,35 @@ fun UserEntity.toMaaUserInfo(): MaaUserInfo {
         followingCount = this.followingCount,
         fansCount = this.fansCount,
     )
+}
+
+private val objectMapper = jacksonObjectMapper()
+infix fun ColumnDeclaring<*>.containsJson(list: Collection<*>): JsonbContainsExpression {
+    return JsonbContainsExpression(
+        left = this.asExpression(),
+        right = objectMapper.writeValueAsString(list),
+        notFlag = false,
+    )
+}
+
+infix fun ColumnDeclaring<String>.containsJson(jsonValue: String): JsonbContainsExpression {
+    return JsonbContainsExpression(
+        left = this.asExpression(),
+        right = jsonValue,
+        notFlag = false,
+    )
+}
+
+/**
+ * JSONB 包含运算符表达式 (@>)
+ */
+class JsonbContainsExpression(
+    val left: ScalarExpression<*>,
+    val right: String,
+    val notFlag: Boolean = false,
+) : ScalarExpression<Boolean>() {
+    override val sqlType: SqlType<Boolean> = BooleanSqlType
+    override val isLeafNode: Boolean = false
+    override val extraProperties: Map<String, Any>
+        get() = mapOf("left" to left, "right" to right, "notFlag" to notFlag)
 }
