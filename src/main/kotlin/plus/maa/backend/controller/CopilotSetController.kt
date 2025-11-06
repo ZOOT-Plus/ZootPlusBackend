@@ -46,9 +46,8 @@ class CopilotSetController(
     @ApiResponse(description = "作业集详情")
     @GetMapping("/get")
     fun getSet(@RequestParam @Parameter(description = "作业集id") id: Long): MaaResult<CopilotSetRes> {
-//        val userIdOrIpAddress = helper.obtainUserIdOrIpAddress()
-        // TODO 作业集热度待修复
-        return success(service.get(id))
+        val userIdOrIpAddress = helper.obtainUserIdOrIpAddress()
+        return success(service.get(id, userIdOrIpAddress))
     }
 
     @Operation(summary = "创建作业集")

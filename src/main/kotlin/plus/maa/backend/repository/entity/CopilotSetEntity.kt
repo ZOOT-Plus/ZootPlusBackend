@@ -1,6 +1,5 @@
 package plus.maa.backend.repository.entity
 
-import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import org.ktorm.database.Database
 import org.ktorm.entity.Entity
 import org.ktorm.entity.sequenceOf
@@ -8,6 +7,7 @@ import org.ktorm.jackson.json
 import org.ktorm.schema.Table
 import org.ktorm.schema.boolean
 import org.ktorm.schema.datetime
+import org.ktorm.schema.double
 import org.ktorm.schema.enum
 import org.ktorm.schema.long
 import org.ktorm.schema.text
@@ -21,6 +21,8 @@ interface CopilotSetEntity : Entity<CopilotSetEntity> {
     var name: String
     var description: String
     var copilotIds: List<Long> // JSON格式存储作业ID列表
+    var views: Long
+    var hotScore: Double
     var creatorId: Long
     var createTime: LocalDateTime
     var updateTime: LocalDateTime
@@ -34,7 +36,9 @@ object CopilotSets : Table<CopilotSetEntity>("copilot_set") {
     val id = long("id").primaryKey().bindTo { it.id }
     val name = varchar("name").bindTo { it.name }
     val description = text("description").bindTo { it.description }
-    val copilotIds = json<List<Long>>("copilot_ids", objectMapper).bindTo { it.copilotIds }
+    val copilotIds = json<List<Long>>("copilot_ids").bindTo { it.copilotIds }
+    val views = long("views").bindTo { it.views }
+    val hotScore = double("hot_score").bindTo { it.hotScore }
     val creatorId = long("creator_id").bindTo { it.creatorId }
     val createTime = datetime("create_time").bindTo { it.createTime }
     val updateTime = datetime("update_time").bindTo { it.updateTime }
@@ -43,8 +47,6 @@ object CopilotSets : Table<CopilotSetEntity>("copilot_set") {
 }
 
 val Database.copilotSets get() = sequenceOf(CopilotSets)
-
-private val objectMapper = jacksonObjectMapper()
 
 /**
  * 设置作业ID列表（序列化为JSON字符串）

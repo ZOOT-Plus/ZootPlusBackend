@@ -26,7 +26,9 @@ import org.ktorm.schema.BooleanSqlType
 import org.ktorm.schema.ColumnDeclaring
 import org.springframework.stereotype.Service
 import plus.maa.backend.cache.transfer.CopilotInnerCacheInfo
+import plus.maa.backend.common.Constants.COPILOT_VIEW_KEY
 import plus.maa.backend.common.Constants.ME
+import plus.maa.backend.common.Constants.VISITED_FLAG
 import plus.maa.backend.common.extensions.blankAsNull
 import plus.maa.backend.common.extensions.removeQuotes
 import plus.maa.backend.common.extensions.requireNotNull
@@ -189,9 +191,9 @@ class CopilotService(
 
         return result?.apply {
             // 60分钟内限制同一个用户对访问量的增加
-            val viewCacheKey = "views:$id:$userIdOrIpAddress"
+            val key = COPILOT_VIEW_KEY(id, userIdOrIpAddress)
             val visitResult = redisCache.setCacheIfAbsent(
-                viewCacheKey,
+                key,
                 VISITED_FLAG,
                 1,
                 TimeUnit.HOURS,
@@ -201,10 +203,7 @@ class CopilotService(
                 second.incrementAndGet()
                 // 丢到调度队列中, 一致性要求不高
                 Thread.startVirtualThread {
-                    copilotKtormRepository.findNotDeletedCopilotId(id)?.let { copilot ->
-                        copilot.views += 1
-                        copilotKtormRepository.updateEntity(copilot)
-                    }
+                    copilotKtormRepository.incrViews(id)
                 }
             }
         }?.run {
@@ -584,8 +583,6 @@ class CopilotService(
     }
 
     companion object {
-
-        private const val VISITED_FLAG = "1"
 
         /**
          * 首页分页查询缓存配置

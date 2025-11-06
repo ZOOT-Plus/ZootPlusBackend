@@ -3,6 +3,8 @@ package plus.maa.backend.service
 import cn.hutool.core.lang.Assert
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.ktorm.database.Database
+import org.ktorm.dsl.asc
+import org.ktorm.dsl.desc
 import org.ktorm.dsl.eq
 import org.ktorm.dsl.from
 import org.ktorm.dsl.inList
@@ -17,7 +19,9 @@ import org.ktorm.entity.sortedBy
 import org.ktorm.entity.take
 import org.ktorm.entity.toList
 import org.springframework.stereotype.Service
+import plus.maa.backend.common.Constants.COPILOT_SET_VIEW_KEY
 import plus.maa.backend.common.Constants.ME
+import plus.maa.backend.common.Constants.VISITED_FLAG
 import plus.maa.backend.common.controller.PagedDTO
 import plus.maa.backend.common.extensions.containsJson
 import plus.maa.backend.common.utils.converter.CopilotSetConverter
@@ -27,6 +31,7 @@ import plus.maa.backend.controller.request.copilotset.CopilotSetQuery
 import plus.maa.backend.controller.request.copilotset.CopilotSetUpdateReq
 import plus.maa.backend.controller.response.copilotset.CopilotSetListRes
 import plus.maa.backend.controller.response.copilotset.CopilotSetRes
+import plus.maa.backend.repository.RedisCache
 import plus.maa.backend.repository.entity.CopilotSetEntity
 import plus.maa.backend.repository.entity.UserFollows
 import plus.maa.backend.repository.entity.copilotSets
@@ -34,6 +39,7 @@ import plus.maa.backend.repository.entity.setCopilotIdsWithCheck
 import plus.maa.backend.repository.ktorm.CopilotSetKtormRepository
 import plus.maa.backend.service.model.CopilotSetStatus
 import java.time.LocalDateTime
+import java.util.concurrent.TimeUnit
 
 /**
  * @author dragove
@@ -44,6 +50,7 @@ class CopilotSetService(
     private val database: Database,
     private val converter: CopilotSetConverter,
     private val copilotSetKtormRepository: CopilotSetKtormRepository,
+    private val redisCache: RedisCache,
     private val userService: UserService,
 ) {
     private val log = KotlinLogging.logger { }
@@ -139,7 +146,8 @@ class CopilotSetService(
         val limit = req.limit
         val offset = page * limit
 
-        var sequence = database.copilotSets.filter { it.delete eq false }
+        var sequence = database.copilotSets
+            .filter { it.delete eq false }
 
         // 权限过滤
         sequence = if (userId == null) {
@@ -186,8 +194,12 @@ class CopilotSetService(
             }
         }
 
+        // 默认热度排序
         val copilotSets = sequence
-            .sortedBy { it.id }
+            .sortedBy(
+                { it.hotScore.desc() },
+                { it.id.asc() },
+            )
             .drop(offset)
             .take(limit)
             .toList()
@@ -204,8 +216,24 @@ class CopilotSetService(
         return PagedDTO(hasNext, totalPages, totalCount, results)
     }
 
-    fun get(id: Long): CopilotSetRes {
-        val copilotSet = copilotSetKtormRepository.findByIdAsOptional(id).orElseThrow { IllegalArgumentException("作业不存在") }
+    fun get(id: Long, userIdOrIpAddress: String): CopilotSetRes {
+        val copilotSet = copilotSetKtormRepository.findByIdAsOptional(id).orElseThrow {
+            IllegalArgumentException("作业集不存在")
+        }
+        // 60分钟内限制同一个用户对访问量的增加
+        val key = COPILOT_SET_VIEW_KEY(id, userIdOrIpAddress)
+        val visitResult = redisCache.setCacheIfAbsent(
+            key,
+            VISITED_FLAG,
+            1,
+            TimeUnit.HOURS,
+        )
+
+        if (visitResult) {
+            Thread.startVirtualThread {
+                copilotSetKtormRepository.incrViews(id)
+            }
+        }
         val userName = userService.findByUserIdOrDefaultInCache(copilotSet.creatorId).userName
         return converter.convertDetail(copilotSet, userName)
     }

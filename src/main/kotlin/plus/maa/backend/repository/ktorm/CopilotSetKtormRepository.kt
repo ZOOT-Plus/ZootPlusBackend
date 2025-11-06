@@ -2,6 +2,8 @@ package plus.maa.backend.repository.ktorm
 
 import org.ktorm.database.Database
 import org.ktorm.dsl.eq
+import org.ktorm.dsl.plus
+import org.ktorm.dsl.update
 import org.ktorm.entity.add
 import org.ktorm.entity.any
 import org.ktorm.entity.firstOrNull
@@ -9,6 +11,7 @@ import org.ktorm.entity.removeIf
 import org.springframework.stereotype.Repository
 import plus.maa.backend.repository.entity.CopilotSetEntity
 import plus.maa.backend.repository.entity.CopilotSets
+import java.util.Optional
 
 @Repository
 class CopilotSetKtormRepository(
@@ -43,8 +46,8 @@ class CopilotSetKtormRepository(
         return entity
     }
 
-    fun findByIdAsOptional(id: Long): java.util.Optional<CopilotSetEntity> {
-        return findById(id)?.let { java.util.Optional.of(it) } ?: java.util.Optional.empty()
+    fun findByIdAsOptional(id: Long): Optional<CopilotSetEntity> {
+        return findById(id)?.let { Optional.of(it) } ?: Optional.empty()
     }
 
     override fun save(entity: CopilotSetEntity): CopilotSetEntity {
@@ -52,6 +55,15 @@ class CopilotSetKtormRepository(
             insertEntity(entity)
         } else {
             updateEntity(entity)
+        }
+    }
+
+    fun incrViews(id: Long) {
+        database.update(CopilotSets) {
+            set(it.views, it.views + 1)
+            where {
+                it.id eq id
+            }
         }
     }
 }

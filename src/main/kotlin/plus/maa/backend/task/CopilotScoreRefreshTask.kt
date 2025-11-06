@@ -51,8 +51,6 @@ class CopilotScoreRefreshTask(
     @Scheduled(cron = "0 30 4 * * ?", zone = "Asia/Shanghai")
     fun refreshHotScores() {
         // 分页获取所有未删除的作业
-//        var pageable = Pageable.ofSize(1000)
-//        var copilots = copilotRepository.findAllByDeleteIsFalse(pageable)
         var offset = 0
         val pageSize = 1000
         val query = copilotRepo.getNotDeletedQuery()
@@ -141,7 +139,6 @@ class CopilotScoreRefreshTask(
                 }
             }
         }
-//        copilotRepository.saveAll(copilots)
     }
 
     private fun counts(keys: Collection<String?>, rating: RatingType, startTime: LocalDateTime): List<RatingCount> {

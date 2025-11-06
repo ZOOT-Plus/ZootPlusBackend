@@ -14,7 +14,6 @@ interface UserFollowEntity : Entity<UserFollowEntity> {
     companion object : Entity.Factory<UserFollowEntity>()
 }
 
-
 object UserFollows : Table<UserFollowEntity>("user_follow") {
     val userId = long("user_id").primaryKey().bindTo { it.userId }
     val followUserId = long("follow_user_id").primaryKey().bindTo { it.followUserId }

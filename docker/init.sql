@@ -163,6 +163,8 @@ create table if not exists copilot_set
   name        text                           not null,
   description text                           not null,
   copilot_ids jsonb                          not null,
+  views       bigint                         not null,
+  hot_score   double precision               not null,
   creator_id  bigint                         not null,
   create_time timestamp(3)                   not null,
   update_time timestamp(3)                   not null,
@@ -185,6 +187,10 @@ create index if not exists idx_copilot_set_creator_id
 
 create index if not exists idx_copilot_set_status
   on copilot_set (status);
+
+create index if not exists idx_copilot_set_copilot_ids
+  on copilot_set using gin (copilot_ids jsonb_path_ops);
+
 
 
 -- 关卡表

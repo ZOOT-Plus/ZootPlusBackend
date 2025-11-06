@@ -5,6 +5,8 @@ import org.ktorm.dsl.and
 import org.ktorm.dsl.eq
 import org.ktorm.dsl.gte
 import org.ktorm.dsl.or
+import org.ktorm.dsl.plus
+import org.ktorm.dsl.update
 import org.ktorm.entity.add
 import org.ktorm.entity.any
 import org.ktorm.entity.filter
@@ -70,5 +72,14 @@ class CopilotKtormRepository(
         return entities.filter {
             (it.uploadTime gte uploadTimeAfter) or (it.deleteTime gte deleteTimeAfter)
         }.toList()
+    }
+
+    fun incrViews(id: Long) {
+        database.update(Copilots) {
+            set(it.views, it.views + 1)
+            where {
+                it.copilotId eq id
+            }
+        }
     }
 }
