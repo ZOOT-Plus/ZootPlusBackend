@@ -1,6 +1,11 @@
 spring:
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    url: jdbc:postgresql://100.84.158.57:5432/zoot
+    username: root
+    password: admin
   profiles:
-    active: dev
+    active: template
   servlet:
     multipart:
       #最大文件阈值
@@ -13,10 +18,6 @@ spring:
     time-zone: UTC
     deserialization:
       FAIL_ON_UNKNOWN_PROPERTIES: false
-  data:
-    mongodb:
-      # 打开自动索引生成（否则数据库内唯一索引不生效
-      auto-index-creation: true
   freemarker:
     check-template-location: false
   # 缓存配置，使用caffeine缓存框架，缓存时长为5分钟，最大缓存数量500

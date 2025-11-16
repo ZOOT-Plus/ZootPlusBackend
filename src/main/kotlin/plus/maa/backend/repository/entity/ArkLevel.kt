@@ -1,8 +1,5 @@
 package plus.maa.backend.repository.entity
 
-import org.springframework.data.annotation.Id
-import org.springframework.data.mongodb.core.index.Indexed
-import org.springframework.data.mongodb.core.mapping.Document
 import java.time.LocalDateTime
 
 /**
@@ -10,12 +7,9 @@ import java.time.LocalDateTime
  *
  * @author john180
  */
-@Document("maa_level")
 data class ArkLevel(
-    @Id
-    val id: String? = null,
+    val id: Long? = null,
     val levelId: String? = null,
-    @Indexed
     val stageId: String? = null,
     // 文件版本, 用于判断是否需要更新
     val sha: String = "",

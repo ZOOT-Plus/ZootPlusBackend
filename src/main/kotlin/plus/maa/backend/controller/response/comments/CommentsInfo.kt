@@ -7,7 +7,7 @@ import java.time.LocalDateTime
  * Date  2023-02-20 17:04
  */
 data class CommentsInfo(
-    val commentId: String,
+    val commentId: Long,
     val uploader: String,
     val uploaderId: String,
     // 评论内容,

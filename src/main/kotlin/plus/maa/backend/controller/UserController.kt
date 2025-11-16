@@ -6,7 +6,6 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
 import jakarta.validation.constraints.Max
-import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
 import org.springframework.validation.annotation.Validated
 import org.springframework.web.bind.annotation.GetMapping
@@ -58,7 +57,7 @@ class UserController(
     @RequireJwt
     @PostMapping("/update/password")
     fun updatePassword(@RequestBody updateDTO: @Valid PasswordUpdateDTO): MaaResult<Unit> {
-        userService.modifyPassword(helper.requireUserId(), updateDTO.newPassword, updateDTO.originalPassword)
+        userService.modifyPassword(helper.userId, updateDTO.newPassword, updateDTO.originalPassword)
         return success()
     }
 
@@ -73,7 +72,7 @@ class UserController(
     @RequireJwt
     @PostMapping("/update/info")
     fun updateInfo(@RequestBody updateDTO: @Valid UserInfoUpdateDTO): MaaResult<Unit> {
-        userService.updateUserInfo(helper.requireUserId(), updateDTO)
+        userService.updateUserInfo(helper.userId, updateDTO)
         return success()
     }
 
@@ -164,7 +163,9 @@ class UserController(
     @ApiResponse(responseCode = "200", description = "用户详情信息")
     @ApiResponse(responseCode = "404", content = [Content()])
     fun getUserInfo(@RequestParam userId: String): MaaResult<MaaUserInfo> {
-        val userInfo = userService.get(userId) ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        val userInfo =
+            userService.get(userId.toLongOrNull() ?: throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid user ID"))
+                ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
         return success(userInfo)
     }
 
@@ -179,8 +180,7 @@ class UserController(
         @RequestParam page: Int = 1,
         @Max(50, message = "查询用户量不能超过50") @RequestParam size: Int = 10,
     ): MaaResult<List<MaaUserInfo>> {
-        val pageable = PageRequest.of(page - 1, size)
-        val resultPage = userService.search(userName, pageable)
-        return success(resultPage.content)
+        val result = userService.search(userName, (page - 1) * size, size)
+        return success(result.map(::MaaUserInfo))
     }
 }

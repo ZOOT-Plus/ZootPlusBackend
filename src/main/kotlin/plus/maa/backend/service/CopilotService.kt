@@ -2,39 +2,56 @@ package plus.maa.backend.service
 
 import com.fasterxml.jackson.core.JsonProcessingException
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.node.ObjectNode
 import io.github.oshai.kotlinlogging.KotlinLogging
-import org.springframework.data.domain.PageRequest
-import org.springframework.data.domain.Pageable
-import org.springframework.data.domain.Sort
-import org.springframework.data.mongodb.core.MongoTemplate
-import org.springframework.data.mongodb.core.query.Criteria
-import org.springframework.data.mongodb.core.query.Query
-import org.springframework.data.mongodb.core.query.Update
-import org.springframework.data.mongodb.core.query.inValues
+import org.ktorm.database.Database
+import org.ktorm.dsl.and
+import org.ktorm.dsl.asc
+import org.ktorm.dsl.desc
+import org.ktorm.dsl.eq
+import org.ktorm.dsl.from
+import org.ktorm.dsl.inList
+import org.ktorm.dsl.like
+import org.ktorm.dsl.notInList
+import org.ktorm.dsl.select
+import org.ktorm.dsl.where
+import org.ktorm.entity.drop
+import org.ktorm.entity.filter
+import org.ktorm.entity.forEach
+import org.ktorm.entity.sortedBy
+import org.ktorm.entity.take
+import org.ktorm.entity.toList
+import org.ktorm.expression.ArgumentExpression
+import org.ktorm.schema.BooleanSqlType
+import org.ktorm.schema.ColumnDeclaring
 import org.springframework.stereotype.Service
 import plus.maa.backend.cache.transfer.CopilotInnerCacheInfo
+import plus.maa.backend.common.Constants.COPILOT_VIEW_KEY
+import plus.maa.backend.common.Constants.ME
+import plus.maa.backend.common.Constants.VISITED_FLAG
 import plus.maa.backend.common.extensions.blankAsNull
 import plus.maa.backend.common.extensions.removeQuotes
 import plus.maa.backend.common.extensions.requireNotNull
-import plus.maa.backend.common.utils.IdComponent
-import plus.maa.backend.common.utils.converter.CopilotConverter
 import plus.maa.backend.config.external.MaaCopilotProperties
 import plus.maa.backend.controller.request.copilot.CopilotCUDRequest
 import plus.maa.backend.controller.request.copilot.CopilotDTO
 import plus.maa.backend.controller.request.copilot.CopilotQueriesRequest
 import plus.maa.backend.controller.request.copilot.CopilotRatingReq
 import plus.maa.backend.controller.response.MaaResultException
-import plus.maa.backend.controller.response.copilot.ArkLevelInfo
 import plus.maa.backend.controller.response.copilot.CopilotInfo
 import plus.maa.backend.controller.response.copilot.CopilotPageInfo
-import plus.maa.backend.repository.CommentsAreaRepository
-import plus.maa.backend.repository.CopilotRepository
 import plus.maa.backend.repository.RedisCache
-import plus.maa.backend.repository.UserFollowingRepository
 import plus.maa.backend.repository.entity.Copilot
 import plus.maa.backend.repository.entity.Copilot.OperationGroup
-import plus.maa.backend.repository.entity.MaaUser
-import plus.maa.backend.repository.entity.Rating
+import plus.maa.backend.repository.entity.CopilotEntity
+import plus.maa.backend.repository.entity.Operators
+import plus.maa.backend.repository.entity.RatingEntity
+import plus.maa.backend.repository.entity.UserEntity
+import plus.maa.backend.repository.entity.UserFollows
+import plus.maa.backend.repository.entity.copilots
+import plus.maa.backend.repository.entity.users
+import plus.maa.backend.repository.ktorm.CommentsAreaKtormRepository
+import plus.maa.backend.repository.ktorm.CopilotKtormRepository
 import plus.maa.backend.service.level.ArkLevelService
 import plus.maa.backend.service.model.CommentStatus
 import plus.maa.backend.service.model.CopilotSetStatus
@@ -47,7 +64,6 @@ import java.time.temporal.ChronoUnit
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
-import java.util.regex.Pattern
 import kotlin.math.ln
 import kotlin.math.max
 import plus.maa.backend.cache.InternalComposeCache as Cache
@@ -58,20 +74,18 @@ import plus.maa.backend.cache.InternalComposeCache as Cache
  */
 @Service
 class CopilotService(
-    private val copilotRepository: CopilotRepository,
+    private val database: Database,
+    private val copilotKtormRepository: CopilotKtormRepository,
     private val ratingService: RatingService,
-    private val mongoTemplate: MongoTemplate,
     private val mapper: ObjectMapper,
     private val levelService: ArkLevelService,
     private val redisCache: RedisCache,
-    private val idComponent: IdComponent,
     private val userRepository: UserService,
-    private val commentsAreaRepository: CommentsAreaRepository,
+    private val commentsAreaKtormRepository: CommentsAreaKtormRepository,
     private val properties: MaaCopilotProperties,
-    private val copilotConverter: CopilotConverter,
     private val sensitiveWordService: SensitiveWordService,
     private val segmentService: SegmentService,
-    private val userFollowingRepository: UserFollowingRepository,
+    private val objectMapper: ObjectMapper,
 ) {
     private val log = KotlinLogging.logger { }
 
@@ -107,29 +121,47 @@ class CopilotService(
     /**
      * 上传新的作业
      */
-    fun upload(loginUserId: String, request: CopilotCUDRequest): Long = copilotConverter.toCopilot(
-        request.content.parseToCopilotDto(),
-        idComponent.getId(Copilot.META),
-        loginUserId,
-        LocalDateTime.now(),
-        request.content,
-        request.status,
-    ).run {
-        copilotRepository.insert(this).copilotId!!.also {
-            segmentService.updateIndex(it, doc?.title, doc?.details)
+    fun upload(loginUserId: Long, request: CopilotCUDRequest): Long {
+        val dto = request.content.parseToCopilotDto()
+        val now = LocalDateTime.now()
+
+        val entity = CopilotEntity {
+            this.stageName = dto.stageName
+            this.uploaderId = loginUserId
+            this.views = 0L
+            this.ratingLevel = 0
+            this.ratingRatio = 0.0
+            this.likeCount = 0L
+            this.dislikeCount = 0L
+            this.hotScore = 0.0
+            this.title = dto.doc?.title ?: ""
+            this.details = dto.doc?.details
+            this.firstUploadTime = now
+            this.uploadTime = now
+            this.content = request.content
+            this.status = request.status
+            this.commentStatus = CommentStatus.ENABLED
+            this.delete = false
+            this.deleteTime = null
+            this.notification = false
         }
+        val copilotId = entity.copilotId
+
+        copilotKtormRepository.insertEntity(entity)
+        segmentService.updateIndex(copilotId, entity.title, entity.details)
+        return copilotId
     }
 
     /**
      * 根据作业id删除作业
      */
-    fun delete(loginUserId: String, request: CopilotCUDRequest) = userEditCopilot(loginUserId, request.id) {
+    fun delete(loginUserId: Long, request: CopilotCUDRequest) = userEditCopilot(loginUserId, request.id) {
         delete = true
         deleteTime = LocalDateTime.now()
     }.apply {
         // 删除作业时，如果被删除的项在 Redis 首页缓存中存在，则清空对应的首页缓存
         // 新增作业就不必，因为新作业显然不会那么快就登上热度榜和浏览量榜
-        deleteCacheWhenMatchCopilotId(copilotId!!)
+        deleteCacheWhenMatchCopilotId(copilotId)
         Cache.invalidateCopilotInfoByCid(copilotId)
     }
 
@@ -138,18 +170,20 @@ class CopilotService(
      */
     fun getCopilotById(userIdOrIpAddress: String, id: Long): CopilotInfo? {
         val result = Cache.getCopilotCache(id) {
-            copilotRepository.findByCopilotIdAndDeleteIsFalse(it)?.run {
-                CopilotInnerCacheInfo(this)
+            copilotKtormRepository.findNotDeletedCopilotId(id)?.run {
+                CopilotInnerCacheInfo(this.copy())
             }
-        }?.let { it ->
+        }?.let {
             val copilot = it.info
-            val maaUser = userRepository.findByUserIdOrDefaultInCache(copilot.uploaderId!!)
+            val maaUser = userRepository.findByUserIdOrDefaultInCache(copilot.uploaderId)
 
-            val commentsCount = Cache.getCommentCountCache(copilot.copilotId!!) { cid ->
-                commentsAreaRepository.countByCopilotIdAndDelete(cid, false)
+            val commentsCount = Cache.getCommentCountCache(copilot.copilotId) { cid ->
+                commentsAreaKtormRepository.countByCopilotId(cid, false)
             }
+            // 查询个人评分（支持 userId 或 IP 地址）
+            val personalRating = ratingService.findPersonalRatingOfCopilot(userIdOrIpAddress, id)
             copilot.format(
-                ratingService.findPersonalRatingOfCopilot(userIdOrIpAddress, id),
+                personalRating,
                 maaUser.userName,
                 commentsCount,
             ) to it.view
@@ -157,9 +191,9 @@ class CopilotService(
 
         return result?.apply {
             // 60分钟内限制同一个用户对访问量的增加
-            val viewCacheKey = "views:$id:$userIdOrIpAddress"
+            val key = COPILOT_VIEW_KEY(id, userIdOrIpAddress)
             val visitResult = redisCache.setCacheIfAbsent(
-                viewCacheKey,
+                key,
                 VISITED_FLAG,
                 1,
                 TimeUnit.HOURS,
@@ -169,11 +203,7 @@ class CopilotService(
                 second.incrementAndGet()
                 // 丢到调度队列中, 一致性要求不高
                 Thread.startVirtualThread {
-                    val query = Query.query(Criteria.where("copilotId").`is`(id))
-                    val update = Update().apply {
-                        inc("views")
-                    }
-                    mongoTemplate.updateFirst(query, update, Copilot::class.java)
+                    copilotKtormRepository.incrViews(id)
                 }
             }
         }?.run {
@@ -182,14 +212,9 @@ class CopilotService(
     }
 
     /**
-     * 分页查询。传入 userId 不为空时限制为用户所有的数据
-     * 会缓存默认状态下热度和访问量排序的结果
-     *
-     * @param userId  获取已登录用户自己的作业数据
-     * @param request 模糊查询
-     * @return CopilotPageInfo
+     * 使用 postgresql 查询作业
      */
-    fun queriesCopilot(userId: String?, request: CopilotQueriesRequest): CopilotPageInfo {
+    fun queriesCopilot(userId: Long?, request: CopilotQueriesRequest): CopilotPageInfo {
         val cacheTimeout = AtomicLong()
         val cacheKey = AtomicReference<String?>()
         val setKey = AtomicReference<String>()
@@ -213,95 +238,23 @@ class CopilotService(
                 }?.let { return it }
         }
 
-        val sortOrder = Sort.Order(
-            if (request.desc) Sort.Direction.DESC else Sort.Direction.ASC,
-            request.orderBy?.blankAsNull().let { ob ->
-                when (ob) {
-                    "hot" -> "hotScore"
-                    "id" -> "copilotId"
-                    else -> request.orderBy
-                }
-            } ?: "copilotId",
-        )
         // 判断是否有值 无值则为默认
         val page = if (request.page > 0) request.page else 1
         val limit = if (request.limit > 0) request.limit else 10
+        val levelKeyword = request.levelKeyword
 
-        val pageable: Pageable = PageRequest.of(page - 1, limit, Sort.by(sortOrder))
+        var inUserIds: List<Long>? = null
 
-        val criteriaObj = Criteria()
-
-        val andQueries: MutableSet<Criteria> = HashSet()
-        val norQueries: MutableSet<Criteria> = HashSet()
-        val orQueries: MutableSet<Criteria> = HashSet()
-
-        andQueries.add(Criteria.where("delete").`is`(false))
-
-        if (request.onlyFollowing && userId != null) {
-            val userFollowing = userFollowingRepository.findByUserId(userId)
-            val followingIds = userFollowing?.followList ?: emptyList()
-
-            if (followingIds.isEmpty()) {
-                return CopilotPageInfo(false, 0, 0, emptyList())
-            }
-            // 添加查询范围为关注者
-            andQueries.add(Criteria.where("uploaderId").`in`(followingIds))
-        }
-        // 仅查询自己的作业时才展示所有数据，否则只查询公开作业
-        if (request.uploaderId == "me" && userId != null) {
-            if (request.status != null) {
-                andQueries.add(Criteria.where("status").`is`(request.status))
-            }
+        val uploaderId = if (request.uploaderId == ME) {
+            userId
         } else {
-            andQueries.add(Criteria.where("status").`is`(CopilotSetStatus.PUBLIC))
+            request.uploaderId?.toLongOrNull()
+        }
+        uploaderId?.let {
+            inUserIds = listOf(it)
         }
 
-        // 关卡名、关卡类型、关卡编号
-        request.levelKeyword?.blankAsNull()?.let { keyword ->
-            val levelInfo = levelService.queryLevelInfosByKeyword(keyword)
-            val c = if (levelInfo.isEmpty()) {
-                Criteria.where("stageName").regex(keyword.toPattern(Pattern.CASE_INSENSITIVE))
-            } else {
-                Criteria.where("stageName").`in`(levelInfo.map(ArkLevelInfo::stageId))
-            }
-            andQueries.add(c)
-        }
-
-        // 作业id列表
-        request.copilotIds?.ifEmpty { null }?.let { ids ->
-            andQueries.add(Criteria.where("copilotId").`in`(ids))
-        }
-
-        // 包含或排除干员
-        request.operator?.removeQuotes()?.split(",")?.filterNot(String::isBlank)?.forEach { oper ->
-            if (oper.startsWith("~")) {
-                // 排除查询指定干员
-                norQueries.add(Criteria.where("opers.name").`is`(oper.substring(1)))
-            } else {
-                // 模糊匹配查询指定干员
-                andQueries.add(Criteria.where("opers.name").`is`(oper))
-            }
-        }
-
-        val uploaderId = if (request.uploaderId == "me") userId else request.uploaderId
-        uploaderId?.blankAsNull()?.let {
-            andQueries.add(Criteria.where("uploaderId").`is`(it))
-        }
-
-        // 封装查询
-        if (andQueries.isNotEmpty()) {
-            criteriaObj.andOperator(andQueries)
-        }
-        if (norQueries.isNotEmpty()) {
-            criteriaObj.norOperator(norQueries)
-        }
-        if (orQueries.isNotEmpty()) {
-            criteriaObj.orOperator(orQueries)
-        }
-
-        // 标题、描述、神秘代码
-        val queryObj = Query().addCriteria(criteriaObj)
-
+        var inCopilotIds: List<Long>? = request.copilotIds
         if (!(keyword?.length == 1 && keyword[0].isLetterOrDigit())) {
             segmentService.getSegment(keyword)
                 .takeIf {
@@ -310,7 +263,7 @@ class CopilotService(
                 ?.let { words ->
                     val idList = words.mapNotNull {
                         val result = segmentService.fetchIndexInfo(it)
-                        if (it.lowercase() == keyword?.lowercase() && result.isEmpty()) {
+                        if (it.equals(keyword, ignoreCase = true) && result.isEmpty()) {
                             null
                         } else {
                             result
@@ -332,35 +285,133 @@ class CopilotService(
                     if (intersection.isEmpty()) {
                         return CopilotPageInfo(false, 1, 0, emptyList())
                     }
-                    queryObj.addCriteria(Copilot::copilotId inValues intersection)
+                    inCopilotIds = inCopilotIds?.intersect(intersection)?.toList() ?: intersection.toList()
                 }
         }
 
-        // 去除large fields
-        queryObj.fields().exclude("content", "actions")
+        val requestStatus = if (request.uploaderId == ME && userId != null) {
+            request.status
+        } else {
+            CopilotSetStatus.PUBLIC
+        }
+        var stageNameKeyword: String? = null
+        var stageNames: List<String>? = null
+        if (levelKeyword != null) {
+            val levelList = levelService.queryLevelInfosByKeyword(levelKeyword)
+            if (levelList.isEmpty()) {
+                stageNameKeyword = keyword
+            } else {
+                stageNames = levelList.map { level -> level.stageId }
+            }
+        }
 
-        val countQueryObj = Query.of(queryObj)
-        // 分页排序查询
-        val copilots = mongoTemplate.find(queryObj.with(pageable), Copilot::class.java)
+        val ops = request.operator?.removeQuotes()?.split(",")?.filterNot(String::isBlank)
+        var includeOps: List<String>? = null
+        var notIncludeOps: List<String>? = null
+        if (ops != null) {
+            val g = ops.groupBy { it.startsWith('~') }
+            if (!g[true].isNullOrEmpty()) {
+                notIncludeOps = g[true]?.map { it.substring(1) }
+            }
+            if (!g[false].isNullOrEmpty()) {
+                includeOps = g[false]
+            }
+        }
 
-        val userIds = copilots.mapNotNull { it.uploaderId }
+        val copilotsSeq = database.copilots.filter {
+            val conditions = ArrayList<ColumnDeclaring<Boolean>>()
+            conditions += ArgumentExpression(true, BooleanSqlType)
+            conditions += it.delete eq false
+            if (requestStatus != null) {
+                conditions += it.status eq requestStatus
+            }
+            if (stageNameKeyword != null) {
+                conditions += it.stageName like stageNameKeyword
+            }
+            if (stageNames != null) {
+                conditions += it.stageName inList stageNames
+            }
+            if (inUserIds != null) {
+                conditions += it.uploaderId inList inUserIds
+            }
+            if (inCopilotIds != null) {
+                conditions += it.copilotId inList inCopilotIds
+            }
+            if (request.onlyFollowing && userId != null) {
+                conditions += it.uploaderId inList (
+                    database.from(UserFollows)
+                        .select(UserFollows.followUserId)
+                        .where { UserFollows.userId eq userId }
+                    )
+            }
+            if (includeOps != null) {
+                conditions += it.copilotId inList (
+                    database.from(Operators)
+                        .select(Operators.copilotId)
+                        .where { Operators.name inList includeOps }
+                    )
+            }
+            if (notIncludeOps != null) {
+                conditions += it.copilotId notInList (
+                    database.from(Operators)
+                        .select(Operators.copilotId)
+                        .where { Operators.name inList notIncludeOps }
+                    )
+            }
+            conditions.reduce { a, b -> a and b }
+        }.sortedBy {
+            val ord = when (request.orderBy ?: "id") {
+                "hot" -> it.hotScore
+                "id" -> it.copilotId
+                "views" -> it.views
+                else -> it.copilotId
+            }
+            if (request.desc) {
+                ord.desc()
+            } else {
+                ord.asc()
+            }
+        }.drop((page - 1) * limit).take(limit)
+
+        val resultAgg = if (keyword.isNullOrEmpty() &&
+            request.levelKeyword.isNullOrBlank() &&
+            request.uploaderId != null &&
+            request.uploaderId != ME &&
+            request.operator.isNullOrBlank() &&
+            request.copilotIds.isNullOrEmpty()
+        ) {
+            val r = copilotsSeq.toList()
+            val count = r.count()
+            val hasNext = count > (page * limit)
+            (r to count) to hasNext
+        } else {
+            val r = copilotsSeq.toList()
+            (r to 0) to (r.size >= limit)
+        }
+
+        val count = resultAgg.first.second
+        val copilots: List<CopilotEntity> = resultAgg.first.first
+        val hasNext = resultAgg.second
+
+        val userIds = copilots.map { it.uploaderId }
 
         // 填充前端所需信息
-        val maaUsers = hashMapOf<String, MaaUser>()
+        val maaUsers = hashMapOf<Long, UserEntity>()
         val remainingUserIds = userIds.filter { userId ->
-            val info = Cache.getMaaUserCache(userId)?.also {
+            val info = Cache.getMaaUserCache(userId.toString())?.also {
                 maaUsers[userId] = it
             }
             info == null
         }.toList()
         if (remainingUserIds.isNotEmpty()) {
-            userRepository.findByUsersId(remainingUserIds).entries().forEach {
-                maaUsers.put(it.key, it.value)
-                Cache.setMaaUserCache(it.key, it.value)
+            val users = database.users.filter { it.userId inList remainingUserIds }
+            users.forEach {
+                maaUsers[it.userId] = it
+                Cache.setUserCache(it.userId.toString(), it)
             }
         }
 
-        val copilotIds = copilots.mapNotNull { it.copilotId }
+        val copilotIds = copilots.map { it.copilotId }
         val commentsCount = hashMapOf<Long, Long>()
         val remainingCopilotIds = copilotIds.filter { copilotId ->
             val c = Cache.getCommentCountCache(copilotId)?.also {
@@ -370,7 +421,7 @@ class CopilotService(
         }.toList()
 
         if (remainingCopilotIds.isNotEmpty()) {
-            val existedCount = commentsAreaRepository.findByCopilotIdInAndDelete(remainingCopilotIds, false)
+            val existedCount = commentsAreaKtormRepository.findByCopilotId(remainingCopilotIds, false)
                 .groupBy { it.copilotId }
                 .mapValues { it.value.size.toLong() }
             copilotIds.forEach { copilotId ->
@@ -383,39 +434,19 @@ class CopilotService(
         // 新版评分系统
         // 反正目前首页和搜索不会直接展示当前用户有没有点赞，干脆直接不查，要用户点进作业才显示自己是否点赞
         val infos = copilots.map { copilot ->
-            copilot.content = mapOf(
-                "stageName" to copilot.stageName,
-                "doc" to copilot.doc,
-                "opers" to copilot.opers,
-                "groups" to copilot.groups,
-                "minimumRequired" to copilot.minimumRequired,
-                "difficulty" to copilot.difficulty,
-            ).run(mapper::writeValueAsString)
+            val contentObj = objectMapper.readTree(copilot.content) as ObjectNode
+            contentObj.remove("actions")
+            copilot.content = contentObj.toString()
+
             copilot.format(
                 null,
-                maaUsers.getOrDefault(copilot.uploaderId!!, MaaUser.UNKNOWN).userName,
+                maaUsers.getOrDefault(copilot.uploaderId, UserEntity.UNKNOWN).userName,
                 commentsCount[copilot.copilotId] ?: 0,
             )
         }
 
-        // 作者页需要返回作业数目
-        val (count, hasNext) = if (keyword.isNullOrEmpty() &&
-            request.levelKeyword.isNullOrBlank() &&
-            request.uploaderId != null &&
-            request.uploaderId != "me" &&
-            request.operator.isNullOrBlank() &&
-            request.copilotIds.isNullOrEmpty()
-        ) {
-            // 查询总数
-            val count = mongoTemplate.count(countQueryObj, Copilot::class.java)
-            val hasNext = count.toInt() > (page * limit)
-            count to hasNext
-        } else {
-            0L to (infos.size >= limit)
-        }
-
         // 封装数据
-        val data = CopilotPageInfo(hasNext, page, count, infos)
+        val data = CopilotPageInfo(hasNext, page, count.toLong(), infos)
 
         // 决定是否缓存
         if (cacheKey.get() != null) {
@@ -430,24 +461,25 @@ class CopilotService(
     /**
      * 增量更新
      */
-    fun update(loginUserId: String, request: CopilotCUDRequest) {
+    fun update(loginUserId: Long, request: CopilotCUDRequest) {
         var cIdToDeleteCache: Long? = null
 
         userEditCopilot(loginUserId, request.id) {
-            segmentService.removeIndex(copilotId!!, doc?.title, doc?.details)
+            segmentService.removeIndex(copilotId, title, details)
 
             // 从公开改为隐藏时，如果数据存在缓存中则需要清除缓存
             if (status == CopilotSetStatus.PUBLIC && request.status == CopilotSetStatus.PRIVATE) cIdToDeleteCache = copilotId
-            copilotConverter.updateCopilotFromDto(
-                request.content.parseToCopilotDto(),
-                request.content,
-                this,
-                request.status,
-            )
+
+            val dto = request.content.parseToCopilotDto()
+            stageName = dto.stageName
+            title = dto.doc?.title ?: title
+            details = dto.doc?.details ?: details
+            content = request.content
+            status = request.status
             uploadTime = LocalDateTime.now()
         }.apply {
             Cache.invalidateCopilotInfoByCid(copilotId)
-            segmentService.updateIndex(copilotId!!, doc?.title, doc?.details)
+            segmentService.updateIndex(copilotId, title, details)
         }
 
         cIdToDeleteCache?.let {
@@ -462,8 +494,9 @@ class CopilotService(
      * @param userIdOrIpAddress 用于已登录用户作出评分
      */
     fun rates(userIdOrIpAddress: String, request: CopilotRatingReq) {
-        requireNotNull(copilotRepository.existsCopilotsByCopilotId(request.id)) { "作业id不存在" }
+        requireNotNull(copilotKtormRepository.existsByCopilotId(request.id)) { "作业id不存在" }
 
+        // 使用 userIdOrIpAddress 进行评分（支持登录用户的 userId 或未登录用户的 IP 地址）
         val ratingChange = ratingService.rateCopilot(
             request.id,
             userIdOrIpAddress,
@@ -471,13 +504,8 @@ class CopilotService(
         )
         val (likeCountChange, dislikeCountChange) = ratingService.calcLikeChange(ratingChange)
 
-        // 获取只包含评分的作业
-        var query = Query.query(
-            Criteria.where("copilotId").`is`(request.id).and("delete").`is`(false),
-        )
-        // 排除 _id，防止误 save 该不完整作业后原有数据丢失
-        query.fields().include("likeCount", "dislikeCount").exclude("_id")
-        val copilot = mongoTemplate.findOne(query, Copilot::class.java)
+        // 获取作业
+        val copilot = copilotKtormRepository.findNotDeletedCopilotId(request.id)
         checkNotNull(copilot) { "作业不存在" }
 
         // 计算评分相关
@@ -488,15 +516,11 @@ class CopilotService(
         // 只取一位小数点
         val ratingLevel = rawRatingLevel.toBigDecimal().setScale(1, RoundingMode.HALF_UP).toDouble()
         // 更新数据
-        query = Query.query(
-            Criteria.where("copilotId").`is`(request.id).and("delete").`is`(false),
-        )
-        val update = Update()
-        update["likeCount"] = likeCount
-        update["dislikeCount"] = ratingCount - likeCount
-        update["ratingLevel"] = (ratingLevel * 10).toInt()
-        update["ratingRatio"] = ratingLevel
-        mongoTemplate.updateFirst(query, update, Copilot::class.java)
+        copilot.likeCount = likeCount
+        copilot.dislikeCount = ratingCount - likeCount
+        copilot.ratingLevel = (ratingLevel * 10).toInt()
+        copilot.ratingRatio = ratingLevel
+        copilotKtormRepository.updateEntity(copilot)
 
         // 记录近期评分变化量前 100 的作业 id
         redisCache.incZSet(
@@ -508,42 +532,41 @@ class CopilotService(
         )
     }
 
-    /**
-     * 将数据库内容转换为前端所需格式
-     */
-    private fun Copilot.format(rating: Rating?, userName: String, commentsCount: Long) = CopilotInfo(
-        id = copilotId!!,
-        uploadTime = uploadTime!!,
-        uploaderId = uploaderId!!,
+    private fun CopilotEntity.format(rating: RatingEntity?, userName: String, commentsCount: Long) = CopilotInfo(
+        id = copilotId,
+        uploadTime = uploadTime,
+        uploaderId = uploaderId.toString(),
         uploader = userName,
         views = views,
         hotScore = hotScore,
         available = true,
         ratingLevel = ratingLevel,
-        notEnoughRating = likeCount + dislikeCount <= properties.copilot.minValueShowNotEnoughRating,
+        notEnoughRating = likeCount + dislikeCount <= this@CopilotService.properties.copilot.minValueShowNotEnoughRating,
         ratingRatio = ratingRatio,
         ratingType = (rating?.rating ?: RatingType.NONE).display,
         commentsCount = commentsCount,
-        commentStatus = commentStatus ?: CommentStatus.ENABLED,
-        content = content ?: "",
+        commentStatus = commentStatus,
+        content = content,
         like = likeCount,
         dislike = dislikeCount,
         status = status,
     )
 
-    fun notificationStatus(userId: String, copilotId: Long, status: Boolean) = userEditCopilot(userId, copilotId) {
+    fun notificationStatus(userId: Long, copilotId: Long, status: Boolean) = userEditCopilot(userId, copilotId) {
         notification = status
     }
 
-    fun commentStatus(userId: String, copilotId: Long, status: CommentStatus) = userEditCopilot(userId, copilotId) {
+    fun commentStatus(userId: Long, copilotId: Long, status: CommentStatus) = userEditCopilot(userId, copilotId) {
         commentStatus = status
     }
 
-    fun userEditCopilot(userId: String?, copilotId: Long?, edit: Copilot.() -> Unit): Copilot {
+    fun userEditCopilot(userId: Long?, copilotId: Long?, edit: CopilotEntity.() -> Unit): CopilotEntity {
         val cId = copilotId.requireNotNull { "copilotId 不能为空" }
-        val copilot = copilotRepository.findByCopilotIdAndDeleteIsFalse(cId).requireNotNull { "copilot 不存在" }
+        val copilot = copilotKtormRepository.findNotDeletedCopilotId(cId).requireNotNull { "copilot 不存在" }
         require(copilot.uploaderId == userId) { "您没有权限修改" }
-        return copilot.apply(edit).run(copilotRepository::save)
+        copilot.apply(edit)
+        copilotKtormRepository.updateEntity(copilot)
+        return copilot
     }
 
     /**
@@ -561,8 +584,6 @@ class CopilotService(
 
     companion object {
 
-        private const val VISITED_FLAG = "1"
-
         /**
          * 首页分页查询缓存配置
          * 格式为：需要缓存的 orderBy 类型（也就是榜单类型） -> 缓存时间
@@ -575,7 +596,7 @@ class CopilotService(
         )
 
         @JvmStatic
-        fun getHotScore(copilot: Copilot, lastWeekLike: Long, lastWeekDislike: Long): Double {
+        fun getHotScore(copilot: CopilotEntity, lastWeekLike: Long, lastWeekDislike: Long): Double {
             val now = LocalDateTime.now()
             val uploadTime = copilot.uploadTime
             // 基于时间的基础分

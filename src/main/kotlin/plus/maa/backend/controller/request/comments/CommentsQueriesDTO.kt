@@ -15,5 +15,5 @@ data class CommentsQueriesDTO(
     val limit: Int = 10,
     val desc: Boolean = true,
     val orderBy: String? = null,
-    val justSeeId: String? = null,
+    val justSeeId: Long? = null,
 )

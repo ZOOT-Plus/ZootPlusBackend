@@ -31,16 +31,16 @@ class UserFollowController(
     @ApiResponse(description = "关注结果")
     @RequireJwt
     @PostMapping("/follow/{followUserId}")
-    fun follow(@PathVariable followUserId: String): MaaResult<Unit> = success(
-        userFollowService.follow(helper.requireUserId(), followUserId),
+    fun follow(@PathVariable followUserId: Long): MaaResult<Unit> = success(
+        userFollowService.follow(helper.userId, followUserId),
     )
 
     @Operation(summary = "取消关注")
     @ApiResponse(description = "取消关注结果")
     @RequireJwt
     @PostMapping("/unfollow/{followUserId}")
-    fun unfollow(@PathVariable followUserId: String): MaaResult<Unit> = success(
-        userFollowService.unfollow(helper.requireUserId(), followUserId),
+    fun unfollow(@PathVariable followUserId: Long): MaaResult<Unit> = success(
+        userFollowService.unfollow(helper.userId, followUserId),
     )
 
     @Operation(summary = "获取关注列表")
@@ -49,7 +49,7 @@ class UserFollowController(
     @GetMapping("/followingList")
     fun getFollowingList(@RequestParam page: Int = 1, @RequestParam size: Int = 10): MaaResult<PagedDTO<MaaUserInfo>> {
         val realPageable = PageRequest.of((page - 1).coerceAtLeast(0), size)
-        return success(userFollowService.getFollowingList(helper.requireUserId(), realPageable).toDto())
+        return success(userFollowService.getFollowingList(helper.userId, realPageable).toDto())
     }
 
     @Operation(summary = "获取粉丝列表")
@@ -58,6 +58,6 @@ class UserFollowController(
     @GetMapping("/fansList")
     fun getFansList(@RequestParam page: Int = 1, @RequestParam size: Int = 10): MaaResult<PagedDTO<MaaUserInfo>> {
         val realPageable = PageRequest.of((page - 1).coerceAtLeast(0), size)
-        return success(userFollowService.getFansList(helper.requireUserId(), realPageable).toDto())
+        return success(userFollowService.getFansList(helper.userId, realPageable).toDto())
     }
 }

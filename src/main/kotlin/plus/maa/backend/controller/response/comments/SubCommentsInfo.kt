@@ -7,7 +7,7 @@ import java.time.LocalDateTime
  * Date  2023-02-20 17:05
  */
 data class SubCommentsInfo(
-    val commentId: String,
+    val commentId: Long,
     val uploader: String,
     val uploaderId: String,
     // 评论内容,
@@ -15,7 +15,7 @@ data class SubCommentsInfo(
     val uploadTime: LocalDateTime,
     val like: Long = 0,
     val dislike: Long = 0,
-    val fromCommentId: String,
-    val mainCommentId: String,
+    val fromCommentId: Long,
+    val mainCommentId: Long,
     val deleted: Boolean = false,
 )

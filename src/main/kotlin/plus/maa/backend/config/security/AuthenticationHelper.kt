@@ -11,6 +11,7 @@ import org.springframework.web.server.ResponseStatusException
 import plus.maa.backend.common.utils.IpUtil
 import plus.maa.backend.service.jwt.JwtAuthToken
 import plus.maa.backend.service.model.LoginUser
+import kotlin.properties.ReadOnlyProperty
 
 /**
  * Auth 助手，统一 auth 的设置和获取
@@ -35,6 +36,12 @@ class AuthenticationHelper {
     @Throws(ResponseStatusException::class)
     fun requireUserId(): String = obtainUserId() ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED)
 
+    val userId by readonly {
+        requireUserId().toLong()
+    }
+
+    fun <T> readonly(block: () -> T): ReadOnlyProperty<Any?, T> = ReadOnlyProperty { _, _ -> block() }
+
     /**
      * 获取用户 id
      *
@@ -43,7 +50,7 @@ class AuthenticationHelper {
     fun obtainUserId(): String? {
         val auth = SecurityContextHolder.getContext().authentication ?: return null
         if (auth is UsernamePasswordAuthenticationToken) {
-            val user = auth.getPrincipal() as? LoginUser
+            val user = auth.principal as? LoginUser
             return user?.userId
         } else if (auth is JwtAuthToken) {
             return auth.subject

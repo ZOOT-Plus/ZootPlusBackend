@@ -7,14 +7,17 @@ services:
     ports:
       - "6379:6379"
     restart: always
-  mongo:
-    image: mongo:latest
-    container_name: mongo
-    volumes:
-      - ../.data:/data/db
-    ports:
-      - "27017:27017"
+  db:
+    image: postgres:17-alpine
+    container_name: postgres
     restart: always
+    ports:
+      - "5432:5432"
+    volumes:
+      - .././data/:/var/lib/postgresql/data/
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    environment:
+      POSTGRES_PASSWORD: 1234
   zootplusbackend:
     image: ghcr.io/zoot-plus/zootplusbackend:latest
     container_name: ZootPlusBackend
@@ -25,8 +28,8 @@ services:
       - ./application-prod.yml:/app/application-prod.yml:ro
     links:
       - redis
-      - mongo
+      - db
     restart: always
     depends_on:
       - redis
-      - mongo
+      - db

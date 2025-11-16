@@ -2,15 +2,28 @@ package plus.maa.backend.service
 
 import cn.hutool.core.lang.Assert
 import io.github.oshai.kotlinlogging.KotlinLogging
-import org.springframework.data.domain.PageRequest
-import org.springframework.data.domain.Sort
-import org.springframework.data.mongodb.core.MongoTemplate
-import org.springframework.data.mongodb.core.query.Criteria
-import org.springframework.data.mongodb.core.query.Query
-import org.springframework.data.support.PageableExecutionUtils
+import org.ktorm.database.Database
+import org.ktorm.dsl.asc
+import org.ktorm.dsl.desc
+import org.ktorm.dsl.eq
+import org.ktorm.dsl.from
+import org.ktorm.dsl.inList
+import org.ktorm.dsl.like
+import org.ktorm.dsl.or
+import org.ktorm.dsl.select
+import org.ktorm.dsl.where
+import org.ktorm.entity.count
+import org.ktorm.entity.drop
+import org.ktorm.entity.filter
+import org.ktorm.entity.sortedBy
+import org.ktorm.entity.take
+import org.ktorm.entity.toList
 import org.springframework.stereotype.Service
+import plus.maa.backend.common.Constants.COPILOT_SET_VIEW_KEY
+import plus.maa.backend.common.Constants.ME
+import plus.maa.backend.common.Constants.VISITED_FLAG
 import plus.maa.backend.common.controller.PagedDTO
-import plus.maa.backend.common.utils.IdComponent
+import plus.maa.backend.common.extensions.containsJson
 import plus.maa.backend.common.utils.converter.CopilotSetConverter
 import plus.maa.backend.controller.request.copilotset.CopilotSetCreateReq
 import plus.maa.backend.controller.request.copilotset.CopilotSetModCopilotsReq
@@ -18,18 +31,14 @@ import plus.maa.backend.controller.request.copilotset.CopilotSetQuery
 import plus.maa.backend.controller.request.copilotset.CopilotSetUpdateReq
 import plus.maa.backend.controller.response.copilotset.CopilotSetListRes
 import plus.maa.backend.controller.response.copilotset.CopilotSetRes
-import plus.maa.backend.repository.CopilotSetRepository
-import plus.maa.backend.repository.UserFollowingRepository
-import plus.maa.backend.repository.entity.CopilotSet
+import plus.maa.backend.repository.RedisCache
+import plus.maa.backend.repository.entity.CopilotSetEntity
+import plus.maa.backend.repository.entity.UserFollows
+import plus.maa.backend.repository.entity.copilotSets
+import plus.maa.backend.repository.entity.setCopilotIdsWithCheck
+import plus.maa.backend.repository.ktorm.CopilotSetKtormRepository
 import plus.maa.backend.service.model.CopilotSetStatus
 import java.time.LocalDateTime
-import java.time.temporal.ChronoUnit
-import java.util.regex.Pattern
-import kotlin.math.*
-import plus.maa.backend.common.extensions.blankAsNull
-import plus.maa.backend.repository.entity.Copilot
-import plus.maa.backend.repository.RedisCache
-import org.springframework.data.mongodb.core.query.Update
 import java.util.concurrent.TimeUnit
 
 /**
@@ -38,13 +47,11 @@ import java.util.concurrent.TimeUnit
  */
 @Service
 class CopilotSetService(
-    private val idComponent: IdComponent,
+    private val database: Database,
     private val converter: CopilotSetConverter,
-    private val userFollowingRepository: UserFollowingRepository,
-    private val repository: CopilotSetRepository,
-    private val userService: UserService,
-    private val mongoTemplate: MongoTemplate,
+    private val copilotSetKtormRepository: CopilotSetKtormRepository,
     private val redisCache: RedisCache,
+    private val userService: UserService,
 ) {
     private val log = KotlinLogging.logger { }
 
@@ -55,40 +62,54 @@ class CopilotSetService(
      * @param userId 创建者用户id
      * @return 作业集id
      */
-    fun create(req: CopilotSetCreateReq, userId: String?): Long {
-        val id = idComponent.getId(CopilotSet.meta)
-        val newCopilotSet = converter.convert(req, id, userId!!)
-        repository.insert(newCopilotSet)
-        return id
+    fun create(req: CopilotSetCreateReq, userId: Long): Long {
+        val now = LocalDateTime.now()
+
+        val entity = CopilotSetEntity {
+            this.name = req.name
+            this.description = req.description
+            this.creatorId = userId
+            this.createTime = now
+            this.updateTime = now
+            this.status = req.status
+            this.delete = false
+        }
+        entity.setCopilotIdsWithCheck(req.copilotIds)
+
+        copilotSetKtormRepository.insertEntity(entity)
+        return entity.id
     }
 
     /**
      * 往作业集中加入作业id列表
      */
-    fun addCopilotIds(req: CopilotSetModCopilotsReq, userId: String) {
-        val copilotSet = repository.findById(req.id).orElseThrow { IllegalArgumentException("作业集不存在") }
+    fun addCopilotIds(req: CopilotSetModCopilotsReq, userId: Long) {
+        val copilotSet = copilotSetKtormRepository.findByIdAsOptional(req.id).orElseThrow { IllegalArgumentException("作业集不存在") }
         Assert.state(copilotSet.creatorId == userId, "您不是该作业集的创建者，无权修改该作业集")
-        copilotSet.copilotIds.addAll(req.copilotIds)
-        copilotSet.copilotIds = copilotSet.distinctIdsAndCheck()
-        repository.save(copilotSet)
+        val currentIds = LinkedHashSet(copilotSet.copilotIds)
+        currentIds.addAll(req.copilotIds)
+        copilotSet.setCopilotIdsWithCheck(currentIds)
+        copilotSetKtormRepository.updateEntity(copilotSet)
     }
 
     /**
      * 往作业集中删除作业id列表
      */
-    fun removeCopilotIds(req: CopilotSetModCopilotsReq, userId: String) {
-        val copilotSet = repository.findById(req.id).orElseThrow { IllegalArgumentException("作业集不存在") }
+    fun removeCopilotIds(req: CopilotSetModCopilotsReq, userId: Long) {
+        val copilotSet = copilotSetKtormRepository.findByIdAsOptional(req.id).orElseThrow { IllegalArgumentException("作业集不存在") }
         Assert.state(copilotSet.creatorId == userId, "您不是该作业集的创建者，无权修改该作业集")
         val removeIds: Set<Long> = HashSet(req.copilotIds)
-        copilotSet.copilotIds.removeIf { o: Long -> removeIds.contains(o) }
-        repository.save(copilotSet)
+        val currentIds = LinkedHashSet(copilotSet.copilotIds)
+        currentIds.removeAll(removeIds)
+        copilotSet.setCopilotIdsWithCheck(currentIds)
+        copilotSetKtormRepository.updateEntity(copilotSet)
     }
 
     /**
      * 更新作业集信息
      */
-    fun update(req: CopilotSetUpdateReq, userId: String) {
-        val copilotSet = repository.findById(req.id).orElseThrow { IllegalArgumentException("作业集不存在") }
+    fun update(req: CopilotSetUpdateReq, userId: Long) {
+        val copilotSet = copilotSetKtormRepository.findByIdAsOptional(req.id).orElseThrow { IllegalArgumentException("作业集不存在") }
         Assert.state(copilotSet.creatorId == userId, "您不是该作业集的创建者，无权修改该作业集")
         if (!req.name.isNullOrBlank()) {
             copilotSet.name = req.name
@@ -100,10 +121,10 @@ class CopilotSetService(
             copilotSet.status = req.status
         }
         if (req.copilotIds != null) {
-            copilotSet.copilotIds = req.copilotIds
-            copilotSet.distinctIdsAndCheck()
+            copilotSet.setCopilotIdsWithCheck(req.copilotIds)
         }
-        repository.save(copilotSet)
+        copilotSet.updateTime = LocalDateTime.now()
+        copilotSetKtormRepository.updateEntity(copilotSet)
     }
 
     /**
@@ -112,151 +133,108 @@ class CopilotSetService(
      * @param id     作业集id
      * @param userId 登陆用户id
      */
-    fun delete(id: Long, userId: String) {
+    fun delete(id: Long, userId: Long) {
         log.info { "delete copilot set for id: $id, userId: $userId" }
-        val copilotSet = repository.findById(id).orElseThrow { IllegalArgumentException("作业集不存在") }
+        val copilotSet = copilotSetKtormRepository.findByIdAsOptional(id).orElseThrow { IllegalArgumentException("作业集不存在") }
         Assert.state(copilotSet.creatorId == userId, "您不是该作业集的创建者，无权删除该作业集")
         copilotSet.delete = true
-        copilotSet.deleteTime = LocalDateTime.now()
-        repository.save(copilotSet)
+        copilotSetKtormRepository.updateEntity(copilotSet)
     }
 
-    fun query(req: CopilotSetQuery, userId: String?): PagedDTO<CopilotSetListRes> {
-        val sortOrder = Sort.Order(
-            if (req.desc) Sort.Direction.DESC else Sort.Direction.ASC,
-            req.orderBy?.blankAsNull().let { ob ->
-                when (ob) {
-                    "hot" -> "hotScore"
-                    "id" -> "id"
-                    "views" -> "views"
-                    "createTime" -> "createTime"
-                    "updateTime" -> "updateTime"
-                    else -> "id"
-                }
-            } ?: "id",
-        )
-        val pageRequest = PageRequest.of(req.page - 1, req.limit, Sort.by(sortOrder))
+    fun query(req: CopilotSetQuery, userId: Long?): PagedDTO<CopilotSetListRes> {
+        val page = req.page - 1
+        val limit = req.limit
+        val offset = page * limit
 
-        val andList = ArrayList<Criteria>()
-        val publicCriteria = Criteria.where("status").`is`(CopilotSetStatus.PUBLIC)
-        val permissionCriterion = if (userId.isNullOrBlank()) {
-            publicCriteria
+        var sequence = database.copilotSets
+            .filter { it.delete eq false }
+
+        // 权限过滤
+        sequence = if (userId == null) {
+            sequence.filter { it.status eq CopilotSetStatus.PUBLIC }
         } else {
-            Criteria().orOperator(publicCriteria, Criteria.where("creatorId").`is`(userId))
-        }
-        andList.add(permissionCriterion)
-        andList.add(Criteria.where("delete").`is`(false))
-
-        if (req.onlyFollowing && userId != null) {
-            val userFollowing = userFollowingRepository.findByUserId(userId)
-            val followingIds = userFollowing?.followList ?: emptyList()
-            if (followingIds.isEmpty()) {
-                return PagedDTO(false, 0, 0, emptyList())
+            sequence.filter {
+                (it.status eq CopilotSetStatus.PUBLIC) or (it.creatorId eq userId)
             }
+        }
 
-            andList.add(Criteria.where("creatorId").`in`(followingIds))
+        // 只关注的用户
+        if (req.onlyFollowing && userId != null) {
+            sequence = sequence.filter {
+                it.creatorId inList (
+                    database.from(UserFollows)
+                        .select(UserFollows.followUserId)
+                        .where { UserFollows.userId eq userId }
+                    )
+            }
+        }
+
+        // 创建者过滤
+        if (!req.creatorId.isNullOrBlank()) {
+            val targetCreatorId: Long = if (req.creatorId == ME && userId != null) {
+                userId
+            } else {
+                req.creatorId.toLongOrNull() ?: return PagedDTO(false, 0, 0, emptyList())
+            }
+            sequence = sequence.filter { it.creatorId eq targetCreatorId }
+        }
+
+        // 关键词搜索
+        if (!req.keyword.isNullOrBlank()) {
+            val keyword = "%${req.keyword}%"
+            sequence = sequence.filter {
+                (it.name like keyword) or (it.description like keyword)
+            }
         }
 
         if (!req.copilotIds.isNullOrEmpty()) {
-            andList.add(Criteria.where("copilotIds").all(req.copilotIds))
-        }
-        if (!req.creatorId.isNullOrBlank()) {
-            if (req.creatorId == "me" && userId != null) {
-                andList.add(Criteria.where("creatorId").`is`(userId))
-            } else {
-                andList.add(Criteria.where("creatorId").`is`(req.creatorId))
+            val requiredIds = req.copilotIds.toSet()
+            sequence = sequence.filter {
+                it.copilotIds containsJson requiredIds
             }
         }
-        if (!req.keyword.isNullOrBlank()) {
-            val pattern = Pattern.compile(req.keyword, Pattern.CASE_INSENSITIVE)
-            andList.add(
-                Criteria().orOperator(
-                    Criteria.where("name").regex(pattern),
-                    Criteria.where("description").regex(pattern),
-                ),
+
+        // 默认热度排序
+        val copilotSets = sequence
+            .sortedBy(
+                { it.hotScore.desc() },
+                { it.id.asc() },
             )
+            .drop(offset)
+            .take(limit)
+            .toList()
+
+        val totalCount = sequence.count().toLong()
+        val hasNext = (offset + limit) < totalCount
+        val totalPages = ((totalCount + limit - 1) / limit).toInt()
+
+        val results = copilotSets.map { cs ->
+            val user = userService.findByUserIdOrDefaultInCache(cs.creatorId)
+            converter.convert(cs, user.userName)
         }
-        val query = Query.query(Criteria().andOperator(andList)).with(pageRequest)
-        val copilotSets = PageableExecutionUtils.getPage(mongoTemplate.find(query, CopilotSet::class.java), pageRequest) {
-            mongoTemplate.count(
-                query.limit(-1).skip(-1),
-                CopilotSet::class.java,
-            )
-        }
-        val userIds = copilotSets.map { obj: CopilotSet -> obj.creatorId }.distinct().toList()
-        val userById = userService.findByUsersId(userIds)
-        return PagedDTO(
-            copilotSets.hasNext(),
-            copilotSets.totalPages,
-            copilotSets.totalElements,
-            copilotSets.map { cs: CopilotSet ->
-                val user = userById.getOrDefault(cs.creatorId)
-                converter.convert(cs, user.userName)
-            }.toList(),
-        )
+
+        return PagedDTO(hasNext, totalPages, totalCount, results)
     }
 
-    fun get(id: Long, userIdOrIpAddress: String): CopilotSetRes = repository.findById(id).map { copilotSet: CopilotSet ->
+    fun get(id: Long, userIdOrIpAddress: String): CopilotSetRes {
+        val copilotSet = copilotSetKtormRepository.findByIdAsOptional(id).orElseThrow {
+            IllegalArgumentException("作业集不存在")
+        }
         // 60分钟内限制同一个用户对访问量的增加
-        val viewCacheKey = "copilot_set_views:$id:$userIdOrIpAddress"
+        val key = COPILOT_SET_VIEW_KEY(id, userIdOrIpAddress)
         val visitResult = redisCache.setCacheIfAbsent(
-            viewCacheKey,
+            key,
             VISITED_FLAG,
             1,
             TimeUnit.HOURS,
         )
 
         if (visitResult) {
-            // 丢到调度队列中, 一致性要求不高
             Thread.startVirtualThread {
-                val query = Query.query(Criteria.where("id").`is`(id))
-                val update = Update().apply {
-                    inc("views")
-                }
-                mongoTemplate.updateFirst(query, update, CopilotSet::class.java)
+                copilotSetKtormRepository.incrViews(id)
             }
         }
-
         val userName = userService.findByUserIdOrDefaultInCache(copilotSet.creatorId).userName
-        converter.convertDetail(copilotSet, userName)
-    }.orElseThrow { IllegalArgumentException("作业集不存在") }
-
-    companion object {
-        private const val VISITED_FLAG = "1"
-
-        /**
-         * 计算作业集热度分数
-         * 基于收录作业的热度、创建时间、浏览量等因素综合计算
-         */
-        fun getHotScore(copilotSet: CopilotSet, copilots: List<Copilot>): Double {
-            val now = LocalDateTime.now()
-            val createTime = copilotSet.createTime
-
-            // 基础分
-            var base = 5.0
-
-            // 时间衰减（相比创建时间过了多少周）
-            val pastedWeeks = ChronoUnit.WEEKS.between(createTime, now) + 1
-            base /= ln((pastedWeeks + 1).toDouble())
-
-            // 收录作业的平均热度分数
-            val avgCopilotScore = if (copilots.isNotEmpty()) {
-                copilots.map { it.hotScore }.average()
-            } else {
-                0.0
-            }
-
-            // 作业数量加成（但有上限，避免无意义堆积）
-            val copilotCountBonus = min(copilots.size.toDouble() / 10.0, 2.0)
-
-            // 浏览量因子
-            val viewsFactor = copilotSet.views / 100.0
-
-            // 综合计算
-            val score = (avgCopilotScore * copilotCountBonus * max(viewsFactor, 1.0)) / pastedWeeks
-            val order = ln(max(score, 1.0))
-
-            return order + score / 1000.0 + base
-        }
+        return converter.convertDetail(copilotSet, userName)
     }
 }
