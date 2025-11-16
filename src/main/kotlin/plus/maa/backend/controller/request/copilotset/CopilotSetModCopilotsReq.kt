@@ -10,10 +10,10 @@ import jakarta.validation.constraints.NotNull
  */
 @Schema(title = "作业集新增作业列表请求")
 data class CopilotSetModCopilotsReq(
-    @Schema(title = "作业集id")
+    @field:Schema(title = "作业集id")
     @field:NotNull(message = "作业集id必填")
     val id: Long,
-    @Schema(title = "添加/删除收藏的作业id列表")
+    @field:Schema(title = "添加/删除收藏的作业id列表")
     @field:NotEmpty(message = "添加/删除作业id列表不可为空")
     val copilotIds: MutableList<Long>,
 )

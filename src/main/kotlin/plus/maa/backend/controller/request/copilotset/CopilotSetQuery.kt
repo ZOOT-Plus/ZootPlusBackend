@@ -12,23 +12,23 @@ import org.springframework.web.bind.annotation.BindParam
  */
 @Schema(title = "作业集列表查询接口参数")
 data class CopilotSetQuery(
-    @Schema(title = "页码")
-    @Positive(message = "页码必须为大于0的数字")
+    @field:Schema(title = "页码")
+    @field:Positive(message = "页码必须为大于0的数字")
     val page: Int = 1,
-    @Schema(title = "单页数据量")
-    @PositiveOrZero(message = "单页数据量必须为大于等于0的数字")
-    @Max(value = 50, message = "单页大小不得超过50")
+    @field:Schema(title = "单页数据量")
+    @field:PositiveOrZero(message = "单页数据量必须为大于等于0的数字")
+    @field:Max(value = 50, message = "单页大小不得超过50")
     val limit: Int = 10,
-    @Schema(title = "查询关键词")
+    @field:Schema(title = "查询关键词")
     val keyword: String? = null,
-    @Schema(title = "创建者id")
+    @field:Schema(title = "创建者id")
     val creatorId: String? = null,
-    @Schema(title = "仅查询关注者的作业集")
+    @field:Schema(title = "仅查询关注者的作业集")
     var onlyFollowing: Boolean = false,
-    @Schema(title = "需要包含的作业id列表")
+    @field:Schema(title = "需要包含的作业id列表")
     val copilotIds: List<Long>? = null,
-    @Schema(title = "降序排列")
+    @field:Schema(title = "降序排列")
     val desc: Boolean = true,
-    @Schema(title = "排序字段")
-    @BindParam("order_by") var orderBy: String? = null,
+    @field:Schema(title = "排序字段")
+    @field:BindParam("order_by") var orderBy: String? = null,
 )
