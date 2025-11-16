@@ -66,6 +66,8 @@ jobs:
       - run: chmod 777 ./gradlew
 
       - name: Execute Gradle generateOpenApi
+        env:
+          MAA_COPILOT_SEGMENT_ENABLED: false
         run: ./gradlew generateOpenApi
 
       - name: Generate Clients
