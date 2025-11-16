@@ -20,6 +20,10 @@ jobs:
           - 6379:6379
       postgres:
         image: postgres
+        env:
+          POSTGRES_USER: root
+          POSTGRES_PASSWORD: admin
+          POSTGRES_DB: zoot
         ports:
           - 5432:5432
 
