@@ -5,7 +5,7 @@ spring:
     username: root
     password: admin
   profiles:
-    active: template
+    active: dev
   servlet:
     multipart:
       #最大文件阈值

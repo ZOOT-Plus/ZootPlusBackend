@@ -6,11 +6,11 @@ services:
     ports:
       - "6379:6379"
     restart: always
-  mongo:
-    image: mongo:latest
-    container_name: mongo
+  postgres:
+    image: postgres:alpine
+    container_name: postgres
     volumes:
       - ../.data:/data/db
     ports:
-      - "27017:27017"
+      - "5432:5432"
     restart: always
