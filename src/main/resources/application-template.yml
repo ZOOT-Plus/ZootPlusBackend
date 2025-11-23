@@ -81,6 +81,11 @@ springdoc:
   # 配置需要生成接口文档的扫描包
   packages-to-scan: plus.maa.backend
 
+# 调试设置，禁用邮箱发送，改为本地控制台打印验证码
+#debug:
+#  email:
+#    no-send: true
+
 # 如果需要打印SQL，则启用下面日志
 #logging:
 #  level:

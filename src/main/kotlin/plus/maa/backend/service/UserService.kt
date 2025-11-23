@@ -141,7 +141,7 @@ class UserService(
         return try {
             val userEntity = userKtormRepository.createFromMaaUser(user)
             userKtormRepository.save(userEntity)
-            MaaUserInfo(user).also {
+            MaaUserInfo(userEntity).also {
                 Cache.invalidateMaaUserById(it.id)
             }
         } catch (_: DuplicateKeyException) {
