@@ -1,6 +1,7 @@
 package plus.maa.backend.controller.request.copilot
 
 import jakarta.validation.constraints.NotBlank
+import jakarta.validation.constraints.NotNull
 import plus.maa.backend.config.validation.RatingType
 
 /**
@@ -8,7 +9,7 @@ import plus.maa.backend.config.validation.RatingType
  * Date  2023-01-20 16:25
  */
 data class CopilotRatingReq(
-    @field:NotBlank(message = "评分作业id不能为空")
+    @field:NotNull(message = "评分作业id不能为空")
     val id: Long,
     @field:NotBlank(message = "评分不能为空")
     @RatingType
