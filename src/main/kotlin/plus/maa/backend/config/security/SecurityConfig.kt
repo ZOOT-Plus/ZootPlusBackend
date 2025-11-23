@@ -107,7 +107,7 @@ class SecurityConfig(
                 "/copilot/get/**",
                 "/copilot/rating",
                 "/comments/query",
-                "/file/upload",
+                "/comments/rating",
                 "/copilot/ban",
                 "/webhook/**",
             )

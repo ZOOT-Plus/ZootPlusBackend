@@ -63,7 +63,7 @@ class CommentsAreaController(
     @RequireJwt
     @PostMapping("/rating")
     fun ratesComments(@RequestBody commentsRatingDTO: @Valid CommentsRatingDTO): MaaResult<String> {
-        commentsAreaService.rates(authHelper.userId, commentsRatingDTO)
+        commentsAreaService.rates(authHelper.obtainUserIdOrIpAddress(), commentsRatingDTO)
         return success("成功")
     }
 

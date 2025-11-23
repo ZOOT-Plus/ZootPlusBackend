@@ -129,13 +129,13 @@ class CommentsAreaService(
      * @param userId            登录用户 id
      * @param commentsRatingDTO CommentsRatingDTO
      */
-    fun rates(userId: Long, commentsRatingDTO: CommentsRatingDTO) {
+    fun rates(userId: String, commentsRatingDTO: CommentsRatingDTO) {
         val commentId = commentsRatingDTO.commentId
         val commentsArea = requireCommentsAreaById(commentId)
 
         val ratingChange = ratingService.rateComment(
             commentId,
-            userId.toString(),
+            userId,
             RatingType.fromRatingType(commentsRatingDTO.rating),
         )
         // 更新评分后更新评论的点赞数
