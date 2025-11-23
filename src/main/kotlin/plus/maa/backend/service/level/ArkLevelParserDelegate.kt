@@ -9,6 +9,7 @@ import plus.maa.backend.service.level.parser.CampaignParser
 import plus.maa.backend.service.level.parser.LegionParser
 import plus.maa.backend.service.level.parser.MainlineParser
 import plus.maa.backend.service.level.parser.MemoryParser
+import plus.maa.backend.service.level.parser.RoguelikeParser
 import plus.maa.backend.service.level.parser.RuneParser
 import plus.maa.backend.service.level.parser.UnknownParser
 import plus.maa.backend.service.level.parser.WeeklyParser
@@ -27,6 +28,7 @@ class ArkLevelParserDelegate(holder: ArkGameDataHolder) {
         RuneParser(holder),
         UnknownParser(),
         WeeklyParser(holder),
+        RoguelikeParser(),
     )
 
     /**

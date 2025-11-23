@@ -121,7 +121,7 @@ class ArkLevelService(
                 it.type == "blob",
                 it.path.endsWith(".json"),
                 it.path != "overview.json",
-                !it.path.contains("roguelike"),
+                it.path.contains("roguelike"),
                 !it.path.startsWith("tr_"),
                 !it.path.startsWith("guide_"),
             )

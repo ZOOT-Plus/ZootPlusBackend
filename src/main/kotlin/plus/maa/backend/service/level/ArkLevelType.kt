@@ -12,7 +12,7 @@ enum class ArkLevelType(
     MEMORY("悖论模拟"),
     RUNE("危机合约"),
     LEGION("保全派驻"),
-    ROGUELIKE("集成战略"), // 实际不进行解析
+    ROGUELIKE("集成战略"),
     TRAINING("训练关卡"), // 实际不进行解析
     SANDBOX("生息演算"), // 实际不进行解析
     UNKNOWN("未知类型"), ;
