@@ -40,7 +40,7 @@ class CopilotSetController(
     @ApiResponse(description = "作业集id")
     @PostMapping("/query")
     fun querySets(@RequestBody req: @Valid CopilotSetQuery): MaaResult<PagedDTO<CopilotSetListRes>> =
-        success(service.query(req, helper.userId))
+        success(service.query(req, helper.obtainUserId()?.toLong()))
 
     @Operation(summary = "查询作业集详情")
     @ApiResponse(description = "作业集详情")
