@@ -74,6 +74,7 @@ class SpringDocConfig(
     @Bean
     fun modelResolver(objectMapper: ObjectMapper) = ModelResolver(objectMapper)
 
+
     companion object {
         const val SECURITY_SCHEME_JWT: String = "Jwt"
         const val SECURITY_SCHEME_API_KEY: String = "API_Key"

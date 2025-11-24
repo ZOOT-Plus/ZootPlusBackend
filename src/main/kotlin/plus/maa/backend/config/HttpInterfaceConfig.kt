@@ -1,27 +1,28 @@
 package plus.maa.backend.config
 
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.databind.PropertyNamingStrategies
+import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNamingStrategy
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.http.HttpHeaders
 import org.springframework.http.codec.ClientCodecConfigurer
-import org.springframework.http.codec.json.Jackson2JsonDecoder
-import org.springframework.http.codec.json.Jackson2JsonEncoder
-import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder
+import org.springframework.http.codec.json.KotlinSerializationJsonEncoder
 import org.springframework.web.reactive.function.client.ExchangeStrategies
 import org.springframework.web.reactive.function.client.WebClient
 import org.springframework.web.reactive.function.client.support.WebClientAdapter
 import org.springframework.web.service.invoker.HttpServiceProxyFactory
+import plus.maa.backend.common.serialization.defaultJson
 import plus.maa.backend.repository.GithubRepository
 
 @Configuration
 class HttpInterfaceConfig {
+    @OptIn(ExperimentalSerializationApi::class)
     @Bean
     fun githubRepository(): GithubRepository {
-        val mapper = Jackson2ObjectMapperBuilder.json()
-            .propertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
-            .build<ObjectMapper>()
+        val json = Json(defaultJson) {
+            namingStrategy = JsonNamingStrategy.SnakeCase
+        }
 
         val client = WebClient.builder()
             .baseUrl("https://api.github.com")
@@ -30,9 +31,7 @@ class HttpInterfaceConfig {
                     .builder()
                     .codecs { codecs: ClientCodecConfigurer ->
                         codecs.defaultCodecs()
-                            .jackson2JsonEncoder(Jackson2JsonEncoder(mapper))
-                        codecs.defaultCodecs()
-                            .jackson2JsonDecoder(Jackson2JsonDecoder(mapper))
+                            .kotlinSerializationJsonEncoder(KotlinSerializationJsonEncoder(json))
                         // 最大 20MB
                         codecs.defaultCodecs().maxInMemorySize(20 * 1024 * 1024)
                     }

@@ -1,7 +1,5 @@
 package plus.maa.backend.config
 
-import com.fasterxml.jackson.databind.PropertyNamingStrategies
-import com.fasterxml.jackson.databind.PropertyNamingStrategies.LowerCamelCaseStrategy
 import org.springframework.aot.hint.annotation.RegisterReflectionForBinding
 import org.springframework.context.annotation.Configuration
 import plus.maa.backend.controller.request.copilot.CopilotDTO
@@ -30,7 +28,5 @@ import plus.maa.backend.repository.entity.gamedata.ArkZone
     ArkTower::class,
     ArkZone::class,
     CopilotDTO::class,
-    PropertyNamingStrategies.SnakeCaseStrategy::class,
-    LowerCamelCaseStrategy::class,
 )
 class NativeReflectionConfig

@@ -1,7 +1,5 @@
 package plus.maa.backend.service.level
 
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.module.kotlin.readValue
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -9,6 +7,8 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.json.Json
 import org.springframework.cache.annotation.Cacheable
 import org.springframework.data.domain.Pageable
 import org.springframework.http.client.reactive.ReactorClientHttpConnector
@@ -48,11 +48,15 @@ class ArkLevelService(
     private val githubRepo: GithubRepository,
     private val redisCache: RedisCache,
     private val arkLevelKtormRepo: ArkLevelKtormRepository,
-    private val mapper: ObjectMapper,
+    json: Json,
     private val arkLevelConverter: ArkLevelConverter,
     private val arkLevelEntityConverter: ArkLevelEntityConverter,
     webClientBuilder: WebClient.Builder,
 ) {
+    @OptIn(ExperimentalSerializationApi::class)
+    private val json = Json(from = json) {
+        namingStrategy = null
+    }
     private val log = KotlinLogging.logger { }
     private val github = properties.github
     private val webClient =
@@ -241,11 +245,11 @@ class ArkLevelService(
      */
     private suspend inline fun <reified T> getTextAsEntity(uri: String): T {
         val text = webClient.get().uri(uri).retrieve().awaitString()
-        return mapper.readValue<T>(text)
+        return json.decodeFromString(text)
     }
 
     private suspend fun <T> workIfStale(key: String, requiredValue: String, block: suspend () -> T): Boolean {
-        val c = redisCache.getCache(key, String::class.java)
+        val c = redisCache.getCache<String>(key)
         if (c == requiredValue) return false
         block.invoke()
         redisCache.setData(key, requiredValue)

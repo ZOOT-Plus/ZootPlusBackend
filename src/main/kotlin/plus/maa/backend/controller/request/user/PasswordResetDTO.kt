@@ -2,10 +2,12 @@ package plus.maa.backend.controller.request.user
 
 import jakarta.validation.constraints.Email
 import jakarta.validation.constraints.NotBlank
+import kotlinx.serialization.Serializable
 
 /**
  * 通过邮件修改密码请求
  */
+@Serializable
 data class PasswordResetDTO(
     /**
      * 邮箱

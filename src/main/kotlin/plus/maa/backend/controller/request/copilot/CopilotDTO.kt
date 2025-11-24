@@ -1,12 +1,14 @@
 package plus.maa.backend.controller.request.copilot
 
 import jakarta.validation.constraints.NotBlank
+import kotlinx.serialization.Serializable
 import plus.maa.backend.repository.entity.Copilot
 
 /**
  * @author LoMu
  * Date  2023-01-10 19:50
  */
+@Serializable
 data class CopilotDTO(
     // 关卡名
     @field:NotBlank(message = "关卡名不能为空")

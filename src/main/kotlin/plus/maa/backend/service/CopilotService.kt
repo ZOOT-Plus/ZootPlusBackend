@@ -1,9 +1,10 @@
 package plus.maa.backend.service
 
-import com.fasterxml.jackson.core.JsonProcessingException
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.databind.node.ObjectNode
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
 import org.ktorm.database.Database
 import org.ktorm.dsl.and
 import org.ktorm.dsl.asc
@@ -61,11 +62,12 @@ import plus.maa.backend.service.sensitiveword.SensitiveWordService
 import java.math.RoundingMode
 import java.time.LocalDateTime
 import java.time.temporal.ChronoUnit
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.ln
 import kotlin.math.max
+import kotlin.time.Duration.Companion.hours
+import kotlin.time.Duration.Companion.seconds
 import plus.maa.backend.cache.InternalComposeCache as Cache
 
 /**
@@ -77,7 +79,7 @@ class CopilotService(
     private val database: Database,
     private val copilotKtormRepository: CopilotKtormRepository,
     private val ratingService: RatingService,
-    private val mapper: ObjectMapper,
+    private val json: Json,
     private val levelService: ArkLevelService,
     private val redisCache: RedisCache,
     private val userRepository: UserService,
@@ -85,7 +87,6 @@ class CopilotService(
     private val properties: MaaCopilotProperties,
     private val sensitiveWordService: SensitiveWordService,
     private val segmentService: SegmentService,
-    private val objectMapper: ObjectMapper,
 ) {
     private val log = KotlinLogging.logger { }
 
@@ -93,8 +94,8 @@ class CopilotService(
      * 将字符串解析为 [CopilotDTO], 检验敏感词并修正前端的冗余部分
      */
     private fun String.parseToCopilotDto() = try {
-        mapper.readValue(this, CopilotDTO::class.java)
-    } catch (e: JsonProcessingException) {
+        json.decodeFromString<CopilotDTO>(this)
+    } catch (e: Exception) {
         log.error(e) { "解析copilot失败" }
         throw MaaResultException("解析copilot失败")
     }.apply {
@@ -195,8 +196,7 @@ class CopilotService(
             val visitResult = redisCache.setCacheIfAbsent(
                 key,
                 VISITED_FLAG,
-                1,
-                TimeUnit.HOURS,
+                1.hours,
             )
             if (visitResult) {
                 // 单机
@@ -234,7 +234,7 @@ class CopilotService(
                     cacheTimeout.set(t)
                     setKey.set(String.format("home:%s:copilotIds", request.orderBy))
                     cacheKey.set(String.format("home:%s:%s", request.orderBy, request.hashCode()))
-                    redisCache.getCache(cacheKey.get()!!, CopilotPageInfo::class.java)
+                    redisCache.getCache<CopilotPageInfo>(cacheKey.get()!!)
                 }?.let { return it }
         }
 
@@ -434,9 +434,13 @@ class CopilotService(
         // 新版评分系统
         // 反正目前首页和搜索不会直接展示当前用户有没有点赞，干脆直接不查，要用户点进作业才显示自己是否点赞
         val infos = copilots.map { copilot ->
-            val contentObj = objectMapper.readTree(copilot.content) as ObjectNode
-            contentObj.remove("actions")
-            copilot.content = contentObj.toString()
+            val contentObj = json.parseToJsonElement(copilot.content ?: "{}").jsonObject
+            val slimContent = buildJsonObject {
+                contentObj.forEach { (key, value) ->
+                    if (key != "actions") put(key, value)
+                }
+            }
+            copilot.content = json.encodeToString(slimContent)
 
             copilot.format(
                 null,
@@ -451,9 +455,9 @@ class CopilotService(
         // 决定是否缓存
         if (cacheKey.get() != null) {
             // 记录存在的作业id
-            redisCache.addSet(setKey.get(), copilotIds, cacheTimeout.get())
+            redisCache.addSet(setKey.get(), copilotIds, cacheTimeout.get().seconds)
             // 缓存数据
-            redisCache.setCache(cacheKey.get()!!, data, cacheTimeout.get())
+            redisCache.setCache(cacheKey.get()!!, data, cacheTimeout.get().seconds)
         }
         return data
     }

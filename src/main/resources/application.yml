@@ -12,12 +12,6 @@ spring:
       max-file-size: 500KB
       #最大请求阈值
       max-request-size: 500KB
-  jackson:
-    property-naming-strategy: SNAKE_CASE
-    date-format: yyyy-MM-dd'T'HH:mm:ss'Z'
-    time-zone: UTC
-    deserialization:
-      FAIL_ON_UNKNOWN_PROPERTIES: false
   freemarker:
     check-template-location: false
   # 缓存配置，使用caffeine缓存框架，缓存时长为5分钟，最大缓存数量500

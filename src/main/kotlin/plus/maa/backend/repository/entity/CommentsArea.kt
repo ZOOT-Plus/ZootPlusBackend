@@ -1,6 +1,5 @@
 package plus.maa.backend.repository.entity
 
-import java.io.Serializable
 import java.time.LocalDateTime
 
 /**
@@ -26,4 +25,4 @@ class CommentsArea(
     val mainCommentId: String? = null,
     // 邮件通知
     var notification: Boolean = false,
-) : Serializable
+)

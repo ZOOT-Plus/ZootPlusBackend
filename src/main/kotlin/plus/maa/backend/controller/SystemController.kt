@@ -3,6 +3,8 @@ package plus.maa.backend.controller
 import com.github.benmanes.caffeine.cache.stats.CacheStats
 import io.swagger.v3.oas.annotations.tags.Tag
 import kotlinx.coroutines.delay
+import kotlinx.serialization.Contextual
+import kotlinx.serialization.Serializable
 import org.springframework.boot.info.GitProperties
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestMapping
@@ -10,6 +12,7 @@ import org.springframework.web.bind.annotation.RestController
 import plus.maa.backend.config.external.MaaCopilotProperties
 import plus.maa.backend.controller.SystemController.CacheStatInfo.Companion.covert
 import plus.maa.backend.controller.response.MaaResult
+import java.time.Instant
 import kotlin.math.roundToLong
 import plus.maa.backend.cache.InternalComposeCache as Cache
 
@@ -58,6 +61,7 @@ class SystemController(
         return MaaResult.success(ret)
     }
 
+    @Serializable
     data class CacheStatInfo(
         val hitRate: Double,
         val missRate: Double,
@@ -83,10 +87,32 @@ class SystemController(
         }
     }
 
+    @Serializable
     data class MaaSystemInfo(
         val title: String,
         val description: String,
         val version: String,
-        val git: GitProperties,
-    )
+        val git: GitInfo,
+    ) {
+        constructor(title: String, description: String, version: String, gitProperties: GitProperties) : this(
+            title,
+            description,
+            version,
+            GitInfo(
+                branch = gitProperties.branch ?: "unknown",
+                commitId = gitProperties.commitId ?: "unknown",
+                shortCommitId = gitProperties.shortCommitId ?: "unknown",
+                commitTime = gitProperties.commitTime ?: Instant.now(),
+            ),
+        )
+
+        @Serializable
+        data class GitInfo(
+            val branch: String,
+            val commitId: String,
+            val shortCommitId: String,
+            @Contextual
+            val commitTime: Instant,
+        )
+    }
 }
