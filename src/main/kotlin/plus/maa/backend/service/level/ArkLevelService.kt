@@ -7,6 +7,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.Json
 import org.springframework.cache.annotation.Cacheable
 import org.springframework.data.domain.Pageable
@@ -47,11 +48,15 @@ class ArkLevelService(
     private val githubRepo: GithubRepository,
     private val redisCache: RedisCache,
     private val arkLevelKtormRepo: ArkLevelKtormRepository,
-    private val json: Json,
+    json: Json,
     private val arkLevelConverter: ArkLevelConverter,
     private val arkLevelEntityConverter: ArkLevelEntityConverter,
     webClientBuilder: WebClient.Builder,
 ) {
+    @OptIn(ExperimentalSerializationApi::class)
+    private val json = Json(from = json) {
+        namingStrategy = null
+    }
     private val log = KotlinLogging.logger { }
     private val github = properties.github
     private val webClient =

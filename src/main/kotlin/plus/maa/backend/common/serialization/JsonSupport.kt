@@ -1,6 +1,7 @@
 package plus.maa.backend.common.serialization
 
 import com.fasterxml.jackson.core.JsonGenerator
+import com.fasterxml.jackson.databind.PropertyNamingStrategies
 import com.fasterxml.jackson.databind.SerializerProvider
 import com.fasterxml.jackson.databind.ser.std.StdSerializer
 import kotlinx.serialization.ExperimentalSerializationApi
@@ -88,6 +89,7 @@ class JacksonConfig {
     fun jsonCustomizer(): Jackson2ObjectMapperBuilderCustomizer =
         Jackson2ObjectMapperBuilderCustomizer { builder: Jackson2ObjectMapperBuilder ->
             val formatter = DateTimeFormatter.ofPattern(DEFAULT_DATE_PATTERN).withZone(defaultZone)
+            builder.propertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
             builder.serializers(LocalDateTimeSerializer(formatter))
         }
 
