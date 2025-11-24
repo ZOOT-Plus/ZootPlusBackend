@@ -7,6 +7,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import org.springframework.web.reactive.function.client.WebClient
 import plus.maa.backend.common.extensions.awaitString
+import plus.maa.backend.common.serialization.defaultJson
 import plus.maa.backend.repository.entity.gamedata.ArkActivity
 import plus.maa.backend.repository.entity.gamedata.ArkCharacter
 import plus.maa.backend.repository.entity.gamedata.ArkCrisisV2Info
@@ -80,7 +81,7 @@ class ArkGameDataHolder private constructor(
         private const val ARK_TOWER = "$ARK_RESOURCE_BASE/climb_tower_table.json"
         private const val ARK_CRISIS_V2 = "$ARK_RESOURCE_BASE/crisis_v2_table.json"
         private val log = KotlinLogging.logger {}
-        private val json: Json = Json { ignoreUnknownKeys = true }
+        private val json: Json = defaultJson()
 
         suspend fun fetch(webClient: WebClient) = coroutineScope {
             val dStageMap = async { webClient.fetchStages() }

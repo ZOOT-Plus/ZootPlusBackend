@@ -1,8 +1,6 @@
 package plus.maa.backend.repository.entity
 
-import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 import org.ktorm.database.Database
 import org.ktorm.entity.Entity
 import org.ktorm.entity.sequenceOf
@@ -54,10 +52,7 @@ object CopilotSets : Table<CopilotSetEntity>("copilot_set") {
     val delete = boolean("delete").bindTo { it.delete }
 }
 
-@OptIn(ExperimentalSerializationApi::class)
-private val json = Json(defaultJson()) {
-    namingStrategy = null
-}
+private val json = defaultJson()
 
 private fun Table<*>.jsonbLongList(name: String) = registerColumn(name, JsonbLongListSqlType)
 
