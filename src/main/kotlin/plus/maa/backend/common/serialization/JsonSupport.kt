@@ -1,5 +1,8 @@
 package plus.maa.backend.common.serialization
 
+import com.fasterxml.jackson.core.JsonGenerator
+import com.fasterxml.jackson.databind.SerializerProvider
+import com.fasterxml.jackson.databind.ser.std.StdSerializer
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerializationException
@@ -11,6 +14,11 @@ import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNamingStrategy
 import kotlinx.serialization.modules.SerializersModule
+import org.springframework.boot.autoconfigure.jackson.Jackson2ObjectMapperBuilderCustomizer
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Configuration
+import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder
+import java.io.IOException
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -73,3 +81,23 @@ object InstantAsStringSerializer : KSerializer<Instant> {
         encoder.encodeString(defaultDateTimeFormatter.format(value))
     }
 }
+
+@Configuration
+class JacksonConfig {
+    @Bean
+    fun jsonCustomizer(): Jackson2ObjectMapperBuilderCustomizer =
+        Jackson2ObjectMapperBuilderCustomizer { builder: Jackson2ObjectMapperBuilder ->
+            val formatter = DateTimeFormatter.ofPattern(DEFAULT_DATE_PATTERN).withZone(defaultZone)
+            builder.serializers(LocalDateTimeSerializer(formatter))
+        }
+
+    class LocalDateTimeSerializer(
+        private val formatter: DateTimeFormatter,
+    ) : StdSerializer<LocalDateTime>(LocalDateTime::class.java) {
+        @Throws(IOException::class)
+        override fun serialize(value: LocalDateTime, gen: JsonGenerator, provider: SerializerProvider) {
+            gen.writeString(value.atZone(ZoneId.systemDefault()).format(formatter))
+        }
+    }
+}
+
