@@ -1,5 +1,7 @@
 package plus.maa.backend.config.doc
 
+import com.fasterxml.jackson.databind.ObjectMapper
+import io.swagger.v3.core.jackson.ModelResolver
 import io.swagger.v3.oas.models.Components
 import io.swagger.v3.oas.models.ExternalDocumentation
 import io.swagger.v3.oas.models.OpenAPI
@@ -68,6 +70,10 @@ class SpringDocConfig(
             },
         )
     }
+
+    @Bean
+    fun modelResolver(objectMapper: ObjectMapper) = ModelResolver(objectMapper)
+
 
     companion object {
         const val SECURITY_SCHEME_JWT: String = "Jwt"
