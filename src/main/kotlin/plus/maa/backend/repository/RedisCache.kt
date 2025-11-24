@@ -14,7 +14,6 @@ import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.data.redis.core.script.RedisScript
 import org.springframework.scheduling.annotation.Async
 import org.springframework.stereotype.Component
-import plus.maa.backend.common.serialization.defaultJson
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
@@ -40,7 +39,7 @@ class RedisCache(
     annotation class RedisCacheInternalApi
 
     @RedisCacheInternalApi
-    final val json: Json = defaultJson()
+    final val json: Json = Json { ignoreUnknownKeys = true }
 
     @RedisCacheInternalApi
     final val expire = expire.seconds
