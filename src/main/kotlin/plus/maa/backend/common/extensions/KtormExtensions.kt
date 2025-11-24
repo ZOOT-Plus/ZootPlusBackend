@@ -1,6 +1,7 @@
 package plus.maa.backend.common.extensions
 
-import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
 import org.ktorm.entity.EntitySequence
 import org.ktorm.entity.count
 import org.ktorm.entity.drop
@@ -13,10 +14,12 @@ import org.ktorm.schema.SqlType
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.Pageable
+import plus.maa.backend.common.serialization.defaultJson
 import plus.maa.backend.controller.response.user.MaaUserInfo
 import plus.maa.backend.repository.entity.MaaUser
 import plus.maa.backend.repository.entity.UserEntity
 
+@Serializable
 data class PageResult<T>(
     val data: List<T>,
     val total: Long,
@@ -65,11 +68,11 @@ fun UserEntity.toMaaUserInfo(): MaaUserInfo {
     )
 }
 
-private val objectMapper = jacksonObjectMapper()
-infix fun ColumnDeclaring<*>.containsJson(list: Collection<*>): JsonbContainsExpression {
+inline infix fun <reified T : Any> ColumnDeclaring<*>.containsJson(list: Collection<T>): JsonbContainsExpression {
+    val json = defaultJson()
     return JsonbContainsExpression(
         left = this.asExpression(),
-        right = objectMapper.writeValueAsString(list),
+        right = json.encodeToString(list),
         notFlag = false,
     )
 }

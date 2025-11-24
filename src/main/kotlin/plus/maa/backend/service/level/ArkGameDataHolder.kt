@@ -1,13 +1,13 @@
 package plus.maa.backend.service.level
 
-import com.fasterxml.jackson.databind.DeserializationFeature
-import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
-import com.fasterxml.jackson.module.kotlin.readValue
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import org.springframework.web.reactive.function.client.WebClient
 import plus.maa.backend.common.extensions.awaitString
+import plus.maa.backend.common.serialization.defaultJson
 import plus.maa.backend.repository.entity.gamedata.ArkActivity
 import plus.maa.backend.repository.entity.gamedata.ArkCharacter
 import plus.maa.backend.repository.entity.gamedata.ArkCrisisV2Info
@@ -81,7 +81,7 @@ class ArkGameDataHolder private constructor(
         private const val ARK_TOWER = "$ARK_RESOURCE_BASE/climb_tower_table.json"
         private const val ARK_CRISIS_V2 = "$ARK_RESOURCE_BASE/crisis_v2_table.json"
         private val log = KotlinLogging.logger {}
-        private val mapper = jacksonObjectMapper().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+        private val json: Json = defaultJson()
 
         suspend fun fetch(webClient: WebClient) = coroutineScope {
             val dStageMap = async { webClient.fetchStages() }
@@ -106,6 +106,8 @@ class ArkGameDataHolder private constructor(
         }
 
         private suspend fun WebClient.fetchStages() = fetchMapRes<ArkStageTable, ArkStage>("stages", ARK_STAGE) { it.stages }
+
+        @Serializable
         private data class ArkStageTable(val stages: Map<String, ArkStage>)
 
         private suspend fun WebClient.fetchChars() = fetchMapRes<Map<String, ArkCharacter>, ArkCharacter>("characters", ARK_CHARACTER) {
@@ -120,6 +122,8 @@ class ArkGameDataHolder private constructor(
         }
 
         private suspend fun WebClient.fetchZones() = fetchMapRes<ArkZoneTable, ArkZone>("zones", ARK_ZONE) { it.zones }
+
+        @Serializable
         private data class ArkZoneTable(val zones: Map<String, ArkZone>)
 
         private suspend fun WebClient.fetchActivities() = fetchMapRes<ArkActivityTable, ArkActivity>("activities", ARK_ACTIVITY) {
@@ -130,15 +134,19 @@ class ArkGameDataHolder private constructor(
             ret
         }
 
+        @Serializable
         private data class ArkActivityTable(val zoneToActivity: Map<String, String>, val basicInfo: Map<String, ArkActivity>)
 
         private suspend fun WebClient.fetchTowers() = fetchMapRes<ArkTowerTable, ArkTower>("towers", ARK_TOWER) { it.towers }
+
+        @Serializable
         private data class ArkTowerTable(val towers: Map<String, ArkTower>)
 
         private suspend fun WebClient.fetchCrisisV2Info() = fetchMapRes<CrisisV2Table, ArkCrisisV2Info>("crisis v2 info", ARK_CRISIS_V2) {
             it.seasonInfoDataMap.mapKeys { entry -> ArkLevelUtil.getKeyInfoById(entry.key) }
         }
 
+        @Serializable
         private data class CrisisV2Table(val seasonInfoDataMap: Map<String, ArkCrisisV2Info>)
 
         private suspend inline fun <reified T, S> WebClient.fetchMapRes(
@@ -147,7 +155,7 @@ class ArkGameDataHolder private constructor(
             crossinline extract: (T) -> Map<String, S>,
         ): Map<String, S> = try {
             val text = get().uri(uri).retrieve().awaitString()
-            val v = mapper.readValue<T>(text)
+            val v = json.decodeFromString<T>(text)
             extract(v).apply { log.info { "获取 $label 数据成功，共 ${this.size} 条" } }
         } catch (e: Exception) {
             throw Exception("获取 $label 数据失败", e)

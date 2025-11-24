@@ -1,7 +1,6 @@
 package plus.maa.backend.repository.entity.gamedata
 
-import com.fasterxml.jackson.databind.PropertyNamingStrategies.LowerCamelCaseStrategy
-import com.fasterxml.jackson.databind.annotation.JsonNaming
+import kotlinx.serialization.Serializable
 
 /**
  * 地图格子数据
@@ -9,7 +8,7 @@ import com.fasterxml.jackson.databind.annotation.JsonNaming
  * @author dragove
  * created on 2022/12/23
  */
-@JsonNaming(LowerCamelCaseStrategy::class)
+@Serializable
 data class ArkTilePos(
     val code: String? = null,
     val height: Int = 0,
@@ -20,7 +19,7 @@ data class ArkTilePos(
     val tiles: List<List<Tile>>? = null,
     val view: List<List<Double>>? = null,
 ) {
-    @JsonNaming(LowerCamelCaseStrategy::class)
+    @Serializable
     data class Tile(
         val tileKey: String? = null,
         val heightType: Int? = null,

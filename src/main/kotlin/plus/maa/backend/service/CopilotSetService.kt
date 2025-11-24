@@ -39,7 +39,7 @@ import plus.maa.backend.repository.entity.setCopilotIdsWithCheck
 import plus.maa.backend.repository.ktorm.CopilotSetKtormRepository
 import plus.maa.backend.service.model.CopilotSetStatus
 import java.time.LocalDateTime
-import java.util.concurrent.TimeUnit
+import kotlin.time.Duration.Companion.hours
 
 /**
  * @author dragove
@@ -225,8 +225,7 @@ class CopilotSetService(
         val visitResult = redisCache.setCacheIfAbsent(
             key,
             VISITED_FLAG,
-            1,
-            TimeUnit.HOURS,
+            1.hours,
         )
 
         if (visitResult) {

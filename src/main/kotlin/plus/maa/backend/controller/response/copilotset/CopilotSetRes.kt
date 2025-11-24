@@ -1,6 +1,8 @@
 package plus.maa.backend.controller.response.copilotset
 
 import io.swagger.v3.oas.annotations.media.Schema
+import kotlinx.serialization.Contextual
+import kotlinx.serialization.Serializable
 import plus.maa.backend.service.model.CopilotSetStatus
 import java.time.LocalDateTime
 
@@ -9,6 +11,7 @@ import java.time.LocalDateTime
  * create on 2024-01-06
  */
 @Schema(title = "作业集响应")
+@Serializable
 data class CopilotSetRes(
     @field:Schema(title = "作业集id")
     val id: Long,
@@ -23,8 +26,10 @@ data class CopilotSetRes(
     @field:Schema(title = "上传者昵称")
     val creator: String,
     @field:Schema(title = "创建时间")
+    @Contextual
     val createTime: LocalDateTime,
     @field:Schema(title = "更新时间")
+    @Contextual
     val updateTime: LocalDateTime,
     @field:Schema(title = "作业状态", enumAsRef = true)
     val status: CopilotSetStatus,

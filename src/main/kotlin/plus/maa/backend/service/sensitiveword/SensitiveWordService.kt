@@ -2,8 +2,9 @@ package plus.maa.backend.service.sensitiveword
 
 import cn.hutool.dfa.StopChar
 import cn.hutool.dfa.WordTree
-import com.fasterxml.jackson.databind.ObjectMapper
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import org.springframework.context.ApplicationContext
 import org.springframework.stereotype.Service
 import plus.maa.backend.config.external.MaaCopilotProperties
@@ -12,7 +13,7 @@ import plus.maa.backend.config.external.MaaCopilotProperties
 class SensitiveWordService(
     private val ctx: ApplicationContext,
     maaCopilotProperties: MaaCopilotProperties,
-    private val objectMapper: ObjectMapper,
+    val json: Json,
 ) {
     private val log = KotlinLogging.logger {}
     private val wordTree = WordTree().apply {
@@ -40,16 +41,22 @@ class SensitiveWordService(
     }
 
     @Throws(SensitiveWordException::class)
-    fun <T> validate(value: T) {
-        if (value == null) return
-
-        // 将输入转换为字符串
-        val text = if (value is String) value else objectMapper.writeValueAsString(value)
-
+    @PublishedApi
+    internal fun internalValidate(value: String) {
         // 使用白名单正则表达式移除文本中匹配的部分
-        val sanitizedText = text.replace(whiteList, "")
+        val sanitizedText = value.replace(whiteList, "")
         // 使用处理后的文本进行敏感词匹配
         val detected = wordTree.matchAll(sanitizedText)
         if (detected.isNotEmpty()) throw SensitiveWordException("包含敏感词：$detected")
+    }
+
+    @Throws(SensitiveWordException::class)
+    final inline fun <reified T> validate(value: T) {
+        if (value == null) return
+
+        // 将输入转换为字符串
+        val text = if (value is String) value else json.encodeToString(value)
+
+        return internalValidate(text)
     }
 }

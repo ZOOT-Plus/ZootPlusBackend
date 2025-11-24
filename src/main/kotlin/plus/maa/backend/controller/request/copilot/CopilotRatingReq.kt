@@ -2,12 +2,14 @@ package plus.maa.backend.controller.request.copilot
 
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotNull
+import kotlinx.serialization.Serializable
 import plus.maa.backend.config.validation.RatingType
 
 /**
  * @author LoMu
  * Date  2023-01-20 16:25
  */
+@Serializable
 data class CopilotRatingReq(
     @field:NotNull(message = "评分作业id不能为空")
     val id: Long,
