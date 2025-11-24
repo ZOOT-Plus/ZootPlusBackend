@@ -1,17 +1,16 @@
 package plus.maa.backend.repository.entity
 
 import kotlinx.serialization.Contextual
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 import plus.maa.backend.common.model.CopilotSetType
 import plus.maa.backend.service.model.CopilotSetStatus
-import java.io.Serializable
 import java.time.LocalDateTime
-import kotlinx.serialization.Serializable as KSerializable
 
 /**
  * 作业集数据
  */
-@KSerializable
+@Serializable
 data class CopilotSet(
     /**
      * 作业集id
@@ -52,4 +51,4 @@ data class CopilotSet(
     var status: CopilotSetStatus,
     @Transient var delete: Boolean = false,
     @Transient var deleteTime: LocalDateTime? = null,
-) : Serializable, CopilotSetType
+) : CopilotSetType

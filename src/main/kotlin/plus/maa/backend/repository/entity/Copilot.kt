@@ -1,18 +1,17 @@
 package plus.maa.backend.repository.entity
 
 import kotlinx.serialization.Contextual
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 import plus.maa.backend.service.model.CommentStatus
 import plus.maa.backend.service.model.CopilotSetStatus
-import java.io.Serializable
 import java.time.LocalDateTime
-import kotlinx.serialization.Serializable as KSerializable
 
 /**
  * @author LoMu
  * Date 2022-12-25 17:56
  */
-@KSerializable
+@Serializable
 class Copilot(
     var id: String? = null,
     // 自增数字ID
@@ -65,8 +64,8 @@ class Copilot(
     var deleteTime: LocalDateTime? = null,
     @Transient
     var notification: Boolean? = null,
-) : Serializable {
-    @KSerializable
+) {
+    @Serializable
     data class OperationGroup(
         // 干员名
         var name: String? = null,
@@ -74,9 +73,9 @@ class Copilot(
         var skill: Int = 1,
         // 技能用法。可选，默认 0
         var skillUsage: Int = 0,
-    ) : Serializable
+    )
 
-    @KSerializable
+    @Serializable
     data class Operators(
         // 干员名
         var name: String? = null,
@@ -85,8 +84,8 @@ class Copilot(
         // 技能用法。可选，默认 0
         var skillUsage: Int = 0,
         var requirements: Requirements = Requirements(),
-    ) : Serializable {
-        @KSerializable
+    ) {
+        @Serializable
         data class Requirements(
             // 精英化等级。可选，默认为 0, 不要求精英化等级
             var elite: Int = 0,
@@ -98,18 +97,18 @@ class Copilot(
             var module: Int = 0,
             // 潜能要求。可选，默认为 0
             var potentiality: Int = 0,
-        ) : Serializable
+        )
     }
 
-    @KSerializable
+    @Serializable
     data class Groups(
         // 群组名
         var name: String? = null,
         val opers: List<OperationGroup>? = null,
         var operators: List<String>? = null,
-    ) : Serializable
+    )
 
-    @KSerializable
+    @Serializable
     data class Action(
         // 操作类型，可选，默认 "Deploy"
         var type: String? = "Deploy",
@@ -134,13 +133,13 @@ class Copilot(
         // 描述
         var doc: String? = "",
         var docColor: String? = "Gray",
-    ) : Serializable
+    )
 
-    @KSerializable
+    @Serializable
     data class Doc(
         var title: String,
         var titleColor: String? = "Gray",
         var details: String? = "",
         var detailsColor: String? = "Gray",
-    ) : Serializable
+    )
 }
