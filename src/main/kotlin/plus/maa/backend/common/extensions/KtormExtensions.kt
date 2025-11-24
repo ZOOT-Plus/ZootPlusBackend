@@ -69,7 +69,7 @@ fun UserEntity.toMaaUserInfo(): MaaUserInfo {
 }
 
 inline infix fun <reified T : Any> ColumnDeclaring<*>.containsJson(list: Collection<T>): JsonbContainsExpression {
-    val json = defaultJson()
+    val json = defaultJson
     return JsonbContainsExpression(
         left = this.asExpression(),
         right = json.encodeToString(list),

@@ -81,7 +81,7 @@ class ArkGameDataHolder private constructor(
         private const val ARK_TOWER = "$ARK_RESOURCE_BASE/climb_tower_table.json"
         private const val ARK_CRISIS_V2 = "$ARK_RESOURCE_BASE/crisis_v2_table.json"
         private val log = KotlinLogging.logger {}
-        private val json: Json = defaultJson()
+        private val json: Json = defaultJson
 
         suspend fun fetch(webClient: WebClient) = coroutineScope {
             val dStageMap = async { webClient.fetchStages() }

@@ -52,7 +52,7 @@ object CopilotSets : Table<CopilotSetEntity>("copilot_set") {
     val delete = boolean("delete").bindTo { it.delete }
 }
 
-private val json = defaultJson()
+private val json = defaultJson
 
 private fun Table<*>.jsonbLongList(name: String) = registerColumn(name, JsonbLongListSqlType)
 

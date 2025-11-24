@@ -1,5 +1,8 @@
 package plus.maa.backend.config
 
+import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNamingStrategy
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.http.HttpHeaders
@@ -14,9 +17,12 @@ import plus.maa.backend.repository.GithubRepository
 
 @Configuration
 class HttpInterfaceConfig {
+    @OptIn(ExperimentalSerializationApi::class)
     @Bean
     fun githubRepository(): GithubRepository {
-        val json = defaultJson()
+        val json = Json(defaultJson) {
+            namingStrategy = JsonNamingStrategy.SnakeCase
+        }
 
         val client = WebClient.builder()
             .baseUrl("https://api.github.com")

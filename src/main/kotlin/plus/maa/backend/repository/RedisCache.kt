@@ -40,7 +40,7 @@ class RedisCache(
     annotation class RedisCacheInternalApi
 
     @RedisCacheInternalApi
-    final val json: Json = defaultJson()
+    final val json: Json = defaultJson
 
     @RedisCacheInternalApi
     final val expire = expire.seconds

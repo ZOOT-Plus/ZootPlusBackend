@@ -13,7 +13,6 @@ import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonNamingStrategy
 import kotlinx.serialization.modules.SerializersModule
 import org.springframework.boot.autoconfigure.jackson.Jackson2ObjectMapperBuilderCustomizer
 import org.springframework.context.annotation.Bean
@@ -31,19 +30,12 @@ private val defaultDateTimeFormatter: DateTimeFormatter =
     DateTimeFormatter.ofPattern(DEFAULT_DATE_PATTERN).withZone(defaultZone)
 
 @OptIn(ExperimentalSerializationApi::class)
-fun defaultJson(): Json {
-    val serializersModule =
-        SerializersModule {
-            contextual(LocalDateTime::class, LocalDateTimeAsStringSerializer)
-            contextual(Instant::class, InstantAsStringSerializer)
-        }
-
-    return Json {
-        namingStrategy = JsonNamingStrategy.SnakeCase
-        encodeDefaults = false
-        explicitNulls = false
-        ignoreUnknownKeys = true
-        this.serializersModule = serializersModule
+val defaultJson = Json {
+    explicitNulls = false
+    ignoreUnknownKeys = true
+    this.serializersModule = SerializersModule {
+        contextual(LocalDateTime::class, LocalDateTimeAsStringSerializer)
+        contextual(Instant::class, InstantAsStringSerializer)
     }
 }
 
