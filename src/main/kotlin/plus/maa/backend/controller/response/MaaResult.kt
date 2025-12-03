@@ -1,11 +1,11 @@
 package plus.maa.backend.controller.response
 
-import com.fasterxml.jackson.annotation.JsonInclude
+import kotlinx.serialization.Serializable
 
 /**
  * @author AnselYuki
  */
-@JsonInclude(JsonInclude.Include.NON_NULL)
+@Serializable
 data class MaaResult<out T>(
     val statusCode: Int,
     val message: String?,

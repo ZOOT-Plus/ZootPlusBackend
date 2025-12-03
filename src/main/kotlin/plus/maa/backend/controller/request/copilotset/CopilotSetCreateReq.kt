@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotNull
 import jakarta.validation.constraints.Size
+import kotlinx.serialization.Serializable
 import plus.maa.backend.common.model.CopilotSetType
 import plus.maa.backend.service.model.CopilotSetStatus
 
@@ -12,6 +13,7 @@ import plus.maa.backend.service.model.CopilotSetStatus
  * create on 2024-01-01
  */
 @Schema(title = "作业集创建请求")
+@Serializable
 data class CopilotSetCreateReq(
     @field:Schema(title = "作业集名称")
     @field:NotBlank(message = "作业集名称不能为空")

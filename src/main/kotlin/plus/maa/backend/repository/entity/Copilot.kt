@@ -1,18 +1,17 @@
 package plus.maa.backend.repository.entity
 
-import com.fasterxml.jackson.annotation.JsonIgnore
-import com.fasterxml.jackson.databind.PropertyNamingStrategies
-import com.fasterxml.jackson.databind.annotation.JsonNaming
+import kotlinx.serialization.Contextual
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 import plus.maa.backend.service.model.CommentStatus
 import plus.maa.backend.service.model.CopilotSetStatus
-import java.io.Serializable
 import java.time.LocalDateTime
 
 /**
  * @author LoMu
  * Date 2022-12-25 17:56
  */
-@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy::class)
+@Serializable
 class Copilot(
     var id: String? = null,
     // 自增数字ID
@@ -45,8 +44,10 @@ class Copilot(
     // 描述
     var doc: Doc?,
     // 首次上传时间
+    @Contextual
     var firstUploadTime: LocalDateTime? = null,
     // 更新时间
+    @Contextual
     var uploadTime: LocalDateTime? = null,
     // 原始数据
     var content: String? = null,
@@ -55,16 +56,16 @@ class Copilot(
      * [plus.maa.backend.service.model.CopilotSetStatus]
      */
     var status: CopilotSetStatus = CopilotSetStatus.PUBLIC,
-    @JsonIgnore
+    @Transient
     var commentStatus: CommentStatus? = CommentStatus.ENABLED,
-    @JsonIgnore
+    @Transient
     var delete: Boolean = false,
-    @JsonIgnore
+    @Transient
     var deleteTime: LocalDateTime? = null,
-    @JsonIgnore
+    @Transient
     var notification: Boolean? = null,
-) : Serializable {
-    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy::class)
+) {
+    @Serializable
     data class OperationGroup(
         // 干员名
         var name: String? = null,
@@ -72,9 +73,9 @@ class Copilot(
         var skill: Int = 1,
         // 技能用法。可选，默认 0
         var skillUsage: Int = 0,
-    ) : Serializable
+    )
 
-    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy::class)
+    @Serializable
     data class Operators(
         // 干员名
         var name: String,
@@ -83,8 +84,8 @@ class Copilot(
         // 技能用法。可选，默认 0
         var skillUsage: Int = 0,
         var requirements: Requirements = Requirements(),
-    ) : Serializable {
-        @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy::class)
+    ) {
+        @Serializable
         data class Requirements(
             // 精英化等级。可选，默认为 0, 不要求精英化等级
             var elite: Int = 0,
@@ -96,18 +97,18 @@ class Copilot(
             var module: Int = 0,
             // 潜能要求。可选，默认为 0
             var potentiality: Int = 0,
-        ) : Serializable
+        )
     }
 
-    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy::class)
+    @Serializable
     data class Groups(
         // 群组名
         var name: String? = null,
         val opers: List<OperationGroup>? = null,
         var operators: List<String>? = null,
-    ) : Serializable
+    )
 
-    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy::class)
+    @Serializable
     data class Action(
         // 操作类型，可选，默认 "Deploy"
         var type: String? = "Deploy",
@@ -132,13 +133,13 @@ class Copilot(
         // 描述
         var doc: String? = "",
         var docColor: String? = "Gray",
-    ) : Serializable
+    )
 
-    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy::class)
+    @Serializable
     data class Doc(
         var title: String,
         var titleColor: String? = "Gray",
         var details: String? = "",
         var detailsColor: String? = "Gray",
-    ) : Serializable
+    )
 }

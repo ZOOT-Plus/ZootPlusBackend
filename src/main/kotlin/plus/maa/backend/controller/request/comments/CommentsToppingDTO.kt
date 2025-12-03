@@ -1,11 +1,13 @@
 package plus.maa.backend.controller.request.comments
 
 import jakarta.validation.constraints.NotNull
+import kotlinx.serialization.Serializable
 
 /**
  * @author Lixuhuilll
  * Date  2023-08-17 11:20
  */
+@Serializable
 data class CommentsToppingDTO(
     @field:NotNull(message = "评论id不可为空")
     val commentId: Long,

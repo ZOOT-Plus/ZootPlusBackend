@@ -1,6 +1,7 @@
 package plus.maa.backend.controller.request.comments
 
 import jakarta.validation.constraints.NotBlank
+import kotlinx.serialization.Serializable
 import org.hibernate.validator.constraints.Length
 import plus.maa.backend.service.model.CommentStatus
 
@@ -8,6 +9,7 @@ import plus.maa.backend.service.model.CommentStatus
  * @author LoMu
  * Date  2023-02-17 14:58
  */
+@Serializable
 data class CommentsAddDTO(
     /**
      * 评论内容

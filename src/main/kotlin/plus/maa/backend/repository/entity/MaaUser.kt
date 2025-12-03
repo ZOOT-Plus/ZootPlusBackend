@@ -1,23 +1,24 @@
 package plus.maa.backend.repository.entity
 
-import com.fasterxml.jackson.annotation.JsonInclude
-import java.io.Serializable
+import kotlinx.serialization.Contextual
+import kotlinx.serialization.Serializable
 import java.time.Instant
 
 /**
  * @author AnselYuki
  */
-@JsonInclude(JsonInclude.Include.NON_NULL)
+@Serializable
 data class MaaUser(
     val userId: String? = null,
     var userName: String,
     val email: String,
     var password: String,
     var status: Int = 0,
+    @Contextual
     var pwdUpdateTime: Instant = Instant.MIN,
     var followingCount: Int = 0,
     var fansCount: Int = 0,
-) : Serializable {
+) {
 
     companion object {
         val UNKNOWN: MaaUser = MaaUser(

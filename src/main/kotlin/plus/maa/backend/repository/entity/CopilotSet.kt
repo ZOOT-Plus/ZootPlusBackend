@@ -1,17 +1,16 @@
 package plus.maa.backend.repository.entity
 
-import com.fasterxml.jackson.annotation.JsonIgnore
-import com.fasterxml.jackson.databind.PropertyNamingStrategies
-import com.fasterxml.jackson.databind.annotation.JsonNaming
+import kotlinx.serialization.Contextual
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 import plus.maa.backend.common.model.CopilotSetType
 import plus.maa.backend.service.model.CopilotSetStatus
-import java.io.Serializable
 import java.time.LocalDateTime
 
 /**
  * 作业集数据
  */
-@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy::class)
+@Serializable
 data class CopilotSet(
     /**
      * 作业集id
@@ -38,16 +37,18 @@ data class CopilotSet(
     /**
      * 创建时间
      */
+    @Contextual
     val createTime: LocalDateTime,
     /**
      * 更新时间
      */
+    @Contextual
     var updateTime: LocalDateTime,
     /**
      * 作业状态
      * [plus.maa.backend.service.model.CopilotSetStatus]
      */
     var status: CopilotSetStatus,
-    @field:JsonIgnore var delete: Boolean = false,
-    @field:JsonIgnore var deleteTime: LocalDateTime? = null,
-) : Serializable, CopilotSetType
+    @Transient var delete: Boolean = false,
+    @Transient var deleteTime: LocalDateTime? = null,
+) : CopilotSetType

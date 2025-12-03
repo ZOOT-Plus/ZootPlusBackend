@@ -1,5 +1,8 @@
 package plus.maa.backend.repository.entity.gamedata
 
+import kotlinx.serialization.Serializable
+
+@Serializable
 data class ArkZone(
     /**
      * 例: main_1
