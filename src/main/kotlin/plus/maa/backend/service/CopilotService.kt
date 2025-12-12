@@ -393,12 +393,13 @@ class CopilotService(
             request.copilotIds.isNullOrEmpty()
         ) {
             val r = copilotsSeq.toList()
-            val count = r.count()
+            val count = copilotsSeq.totalRecordsInAllPages
             val hasNext = count > (page * limit)
             (r to count) to hasNext
         } else {
             val r = copilotsSeq.toList()
-            (r to 0) to (r.size >= limit)
+            val count = copilotsSeq.totalRecordsInAllPages
+            (r to count) to (r.size >= limit)
         }
 
         val count = resultAgg.first.second
