@@ -1,11 +1,9 @@
 package plus.maa.backend.repository
 
-import com.fasterxml.jackson.core.JsonProcessingException
-import com.fasterxml.jackson.databind.DeserializationFeature
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
-import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import org.apache.commons.lang3.StringUtils
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.core.io.ClassPathResource
@@ -16,10 +14,14 @@ import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.data.redis.core.script.RedisScript
 import org.springframework.scheduling.annotation.Async
 import org.springframework.stereotype.Component
-import java.util.concurrent.TimeUnit
+import plus.maa.backend.common.serialization.defaultJson
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.toJavaDuration
 
-private val log = KotlinLogging.logger { }
+@RedisCache.RedisCacheInternalApi
+val log = KotlinLogging.logger { }
 
 /**
  * Redis工具类
@@ -27,16 +29,22 @@ private val log = KotlinLogging.logger { }
  * @author AnselYuki
  */
 @Component
+@OptIn(RedisCache.RedisCacheInternalApi::class)
 class RedisCache(
-    @param:Value($$"${maa-copilot.cache.default-expire}") private val expire: Int,
-    private val redisTemplate: StringRedisTemplate,
+    @Value($$"${maa-copilot.cache.default-expire}") expire: Int,
+    @RedisCacheInternalApi
+    val redisTemplate: StringRedisTemplate,
 ) {
-    //  添加 JSR310 模块，以便顺利序列化 LocalDateTime 等类型
-    private val writeMapper: ObjectMapper = jacksonObjectMapper()
-        .registerModules(JavaTimeModule())
-    private val readMapper: ObjectMapper = jacksonObjectMapper()
-        .registerModules(JavaTimeModule())
-        .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+    @Target(AnnotationTarget.FUNCTION, AnnotationTarget.PROPERTY)
+    @RequiresOptIn("only public for technical reason, do not use this directly", RequiresOptIn.Level.ERROR)
+    annotation class RedisCacheInternalApi
+
+    @RedisCacheInternalApi
+    final val json: Json = defaultJson
+
+    @RedisCacheInternalApi
+    final val expire = expire.seconds
+
 
     private val supportUnlink = AtomicBoolean(true)
 
@@ -44,45 +52,34 @@ class RedisCache(
         使用 lua 脚本插入数据，维持 ZSet 的相对大小（size <= 实际大小 <= size + 50）以及过期时间
         实际大小这么设计是为了避免频繁的 ZREMRANGEBYRANK 操作
      */
-    private val incZSetRedisScript: RedisScript<Any> = RedisScript.of(ClassPathResource("redis-lua/incZSet.lua"))
+    @RedisCacheInternalApi
+    val incZSetRedisScript: RedisScript<Any> = RedisScript.of(ClassPathResource("redis-lua/incZSet.lua"))
 
     // 比较与输入的键值对是否相同，相同则删除
-    private val removeKVIfEqualsScript: RedisScript<Boolean> = RedisScript.of(
+    @RedisCacheInternalApi
+    val removeKVIfEqualsScript: RedisScript<Boolean?> = RedisScript.of(
         ClassPathResource("redis-lua/removeKVIfEquals.lua"),
         Boolean::class.java,
     )
 
-    fun <T> setData(key: String, value: T) {
-        setCache(key, value, 0, TimeUnit.SECONDS)
+    final inline fun <reified T : Any> setData(key: String, value: T) {
+        setCache(key, getJson(value) ?: return, 0.seconds)
     }
 
-    fun <T> setCache(key: String, value: T) {
-        setCache(key, value, expire.toLong(), TimeUnit.SECONDS)
+    final inline fun <reified T> setCache(key: String, value: T, timeout: Duration = expire) {
+        val encoded = getJson(value) ?: return
+        setCacheString(key, encoded, timeout)
     }
 
-    fun <T> setCache(key: String, value: T, timeout: Long) {
-        setCache(key, value, timeout, TimeUnit.SECONDS)
-    }
-
-    fun <T> setCache(key: String, value: T, timeout: Long, timeUnit: TimeUnit) {
-        val json = getJson(value) ?: return
-        if (timeout <= 0) {
-            redisTemplate.opsForValue()[key] = json
+    @RedisCacheInternalApi
+    fun setCacheString(key: String, encoded: String, timeout: Duration = expire) {
+        if (!timeout.isPositive()) {
+            redisTemplate.opsForValue()[key] = encoded
         } else {
-            redisTemplate.opsForValue()[key, json, timeout] = timeUnit
+            redisTemplate.opsForValue().set(key, encoded, timeout.toJavaDuration())
         }
     }
 
-    /**
-     * 当缓存不存在时，则 set
-     *
-     * @param key 缓存的 key
-     * @param value 被缓存的值
-     * @return 是否 set
-     */
-    fun <T> setCacheIfAbsent(key: String, value: T): Boolean {
-        return setCacheIfAbsent(key, value, expire.toLong())
-    }
 
     /**
      * 当缓存不存在时，则 set
@@ -92,34 +89,23 @@ class RedisCache(
      * @param timeout 过期时间
      * @return 是否 set
      */
-    fun <T> setCacheIfAbsent(key: String, value: T, timeout: Long): Boolean {
-        return setCacheIfAbsent(key, value, timeout, TimeUnit.SECONDS)
+    final inline fun <reified T> setCacheIfAbsent(key: String, value: T, timeout: Duration): Boolean {
+        val encoded = getJson(value) ?: return false
+        return setCacheStringIfAbsent(key, encoded, timeout)
     }
 
-    /**
-     * 当缓存不存在时，则 set
-     *
-     * @param key 缓存的 key
-     * @param value 被缓存的值
-     * @param timeout 过期时间
-     * @param timeUnit 过期时间的单位
-     * @return 是否 set
-     */
-    fun <T> setCacheIfAbsent(key: String, value: T, timeout: Long, timeUnit: TimeUnit): Boolean {
-        val json = getJson(value) ?: return false
-        val result = if (timeout <= 0) {
-            java.lang.Boolean.TRUE == redisTemplate.opsForValue().setIfAbsent(key, json)
+
+    @RedisCacheInternalApi
+    fun setCacheStringIfAbsent(key: String, jsonString: String, timeout: Duration): Boolean {
+        val result = if (!timeout.isPositive()) {
+            redisTemplate.opsForValue().setIfAbsent(key, jsonString) == true
         } else {
-            java.lang.Boolean.TRUE == redisTemplate.opsForValue().setIfAbsent(key, json, timeout, timeUnit)
+            redisTemplate.opsForValue().setIfAbsent(key, jsonString, timeout.toJavaDuration()) == false
         }
         return result
     }
 
-    fun <T> addSet(key: String, set: Collection<T>, timeout: Long) {
-        addSet(key, set, timeout, TimeUnit.SECONDS)
-    }
-
-    fun <T> addSet(key: String, set: Collection<T>, timeout: Long, timeUnit: TimeUnit) {
+    final inline fun <reified T> addSet(key: String, set: Collection<T>, timeout: Duration) {
         if (set.isEmpty()) {
             return
         }
@@ -128,12 +114,16 @@ class RedisCache(
             val json = getJson(t) ?: return
             jsonList[i] = json
         }
+        return addSetJsonStrings(key, jsonList, timeout)
+    }
 
-        if (timeout <= 0) {
+    @RedisCacheInternalApi
+    fun addSetJsonStrings(key: String, jsonList: Array<String?>, timeout: Duration) {
+        if (!timeout.isPositive()) {
             redisTemplate.opsForSet().add(key, *jsonList)
         } else {
             redisTemplate.opsForSet().add(key, *jsonList)
-            redisTemplate.expire(key, timeout, timeUnit)
+            redisTemplate.expire(key, timeout.toJavaDuration())
         }
     }
 
@@ -169,75 +159,60 @@ class RedisCache(
         return redisTemplate.opsForZSet().reverseRange(key, start, end)
     }
 
-    fun <T> valueMemberInSet(key: String, value: T): Boolean {
-        try {
-            val json = getJson(value) ?: return false
-            return java.lang.Boolean.TRUE == redisTemplate.opsForSet().isMember(key, json)
+    final inline fun <reified T> valueMemberInSet(key: String, value: T): Boolean {
+        val json = getJson(value) ?: return false
+        return jsonStringMemberInSet(key, json)
+    }
+
+    @RedisCacheInternalApi
+    fun jsonStringMemberInSet(key: String, jsonString: String): Boolean {
+        return try {
+            redisTemplate.opsForSet().isMember(key, jsonString) == true
         } catch (e: Exception) {
             log.error(e) { e.message }
+            false
         }
-        return false
     }
 
-    fun <T> getCache(key: String, valueType: Class<T>): T? {
-        return getCache(key, valueType, null, expire.toLong(), TimeUnit.SECONDS)
-    }
-
-    fun <T> getCache(key: String, valueType: Class<T>, onMiss: (() -> T)?): T? {
-        return getCache(key, valueType, onMiss, expire.toLong(), TimeUnit.SECONDS)
-    }
-
-    fun <T> getCache(key: String, valueType: Class<T>, onMiss: (() -> T)?, timeout: Long): T? {
-        return getCache(key, valueType, onMiss, timeout, TimeUnit.SECONDS)
-    }
-
-    fun <T> getCache(key: String, valueType: Class<T>, onMiss: (() -> T)?, timeout: Long, timeUnit: TimeUnit): T? {
+    final inline fun <reified T> getCache(key: String, noinline onMiss: (() -> T)? = null, timeout: Duration = expire): T? {
         try {
-            var json = redisTemplate.opsForValue()[key]
-            if (StringUtils.isEmpty(json)) {
+            var cached = redisTemplate.opsForValue()[key]
+            if (cached.isNullOrEmpty()) {
                 if (onMiss == null) {
                     return null
                 }
                 // 上锁
                 synchronized(RedisCache::class.java) {
                     // 再次查询缓存，目的是判断是否前面的线程已经set过了
-                    json = redisTemplate.opsForValue()[key]
+                    cached = redisTemplate.opsForValue()[key]
                     // 第二次校验缓存是否存在
-                    if (StringUtils.isEmpty(json)) {
+                    if (cached.isNullOrEmpty()) {
                         val result = onMiss()
                         // 数据库中不存在
-                        setCache(key, result, timeout, timeUnit)
+                        setCache(key, result, timeout)
                         return result
                     }
                 }
             }
-            return readMapper.readValue(json, valueType)
+            return cached?.let { json.decodeFromString<T>(it) }
         } catch (e: Exception) {
             log.error(e) { e.message }
             return null
         }
     }
 
-    fun <T> updateCache(key: String, valueType: Class<T>, defaultValue: T, onUpdate: (T) -> T) {
-        updateCache(key, valueType, defaultValue, onUpdate, expire.toLong(), TimeUnit.SECONDS)
-    }
-
-    fun <T> updateCache(key: String, valueType: Class<T>?, defaultValue: T, onUpdate: (T) -> T, timeout: Long) {
-        updateCache(key, valueType, defaultValue, onUpdate, timeout, TimeUnit.SECONDS)
-    }
-
-    fun <T> updateCache(key: String, valueType: Class<T>?, defaultValue: T, onUpdate: (T) -> T, timeout: Long, timeUnit: TimeUnit) {
+    final inline fun <reified T> updateCache(key: String, defaultValue: T, onUpdate: (T) -> T, timeout: Duration = expire) {
         var result: T
         try {
             synchronized(RedisCache::class.java) {
-                val json = redisTemplate.opsForValue()[key]
-                result = if (StringUtils.isEmpty(json)) {
+                val cached = redisTemplate.opsForValue()[key]
+                result = if (cached.isNullOrEmpty()) {
                     defaultValue
                 } else {
-                    readMapper.readValue(json, valueType)
+                    json.decodeFromString(cached)
                 }
                 result = onUpdate(result)
-                setCache(key, result, timeout, timeUnit)
+                setCache(key, result, timeout)
             }
         } catch (e: Exception) {
             log.error(e) { e.message }
@@ -252,36 +227,28 @@ class RedisCache(
     @JvmOverloads
     fun removeCache(keys: Collection<String>, notUseUnlink: Boolean = false) {
         if (!notUseUnlink && supportUnlink.get()) {
+            val exceptionHandler = { e: Exception ->
+                val cause = e.cause
+                if (cause == null || !StringUtils.containsAny(
+                        cause.message,
+                        "unknown command",
+                        "not support",
+                    )
+                ) {
+                    throw e
+                }
+                if (supportUnlink.compareAndSet(true, false)) {
+                    log.warn { "当前连接的 Redis Service 可能不支持 Unlink 命令，切换为 Del" }
+                }
+            }
             try {
                 redisTemplate.unlink(keys)
                 return
             } catch (e: InvalidDataAccessApiUsageException) {
                 // Redisson、Jedis、Lettuce
-                val cause = e.cause
-                if (cause == null || !StringUtils.containsAny(
-                        cause.message,
-                        "unknown command",
-                        "not support",
-                    )
-                ) {
-                    throw e
-                }
-                if (supportUnlink.compareAndSet(true, false)) {
-                    log.warn { "当前连接的 Redis Service 可能不支持 Unlink 命令，切换为 Del" }
-                }
+                exceptionHandler(e)
             } catch (e: RedisSystemException) {
-                val cause = e.cause
-                if (cause == null || !StringUtils.containsAny(
-                        cause.message,
-                        "unknown command",
-                        "not support",
-                    )
-                ) {
-                    throw e
-                }
-                if (supportUnlink.compareAndSet(true, false)) {
-                    log.warn { "当前连接的 Redis Service 可能不支持 Unlink 命令，切换为 Del" }
-                }
+                exceptionHandler(e)
             }
         }
 
@@ -296,9 +263,10 @@ class RedisCache(
      * @param value 待比较的值
      * @return 是否删除
      */
-    fun <T> removeKVIfEquals(key: String, value: T): Boolean {
+    final inline fun <reified T> removeKVIfEquals(key: String, value: T): Boolean {
         val json = getJson(value) ?: return false
-        return java.lang.Boolean.TRUE == redisTemplate.execute(removeKVIfEqualsScript, listOf(key), json)
+        @Suppress("SimplifyBooleanWithConstants")
+        return redisTemplate.execute(removeKVIfEqualsScript, listOf(key), json) == true
     }
 
     /**
@@ -352,16 +320,15 @@ class RedisCache(
         }
     }
 
-    private fun <T> getJson(value: T): String? {
-        val json: String
+    @RedisCacheInternalApi
+    final inline fun <reified T> getJson(value: T): String? =
         try {
-            json = writeMapper.writeValueAsString(value)
-        } catch (e: JsonProcessingException) {
-            if (log.isDebugEnabled()) {
-                log.debug(e) { e.message }
-            }
-            return null
+            json.encodeToString(value)
+        } catch (e: SerializationException) {
+            log.debug { e.message }
+            null
+        } catch (e: IllegalArgumentException) {
+            log.debug { e.message }
+            null
         }
-        return json
-    }
 }

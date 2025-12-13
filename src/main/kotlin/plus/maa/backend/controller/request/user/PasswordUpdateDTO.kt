@@ -1,11 +1,13 @@
 package plus.maa.backend.controller.request.user
 
 import jakarta.validation.constraints.NotBlank
+import kotlinx.serialization.Serializable
 import org.hibernate.validator.constraints.Length
 
 /**
  * @author AnselYuki
  */
+@Serializable
 data class PasswordUpdateDTO(
     @field:NotBlank(message = "请输入原密码")
     val originalPassword: String,

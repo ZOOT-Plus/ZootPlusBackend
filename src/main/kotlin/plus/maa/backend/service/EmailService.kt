@@ -16,6 +16,7 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * @author LoMu
@@ -58,7 +59,7 @@ class EmailService(
     fun sendVCode(email: String) {
         // 一个过期周期最多重发十条，记录已发送的邮箱以及间隔时间
         val timeout = maaCopilotProperties.vcode.expire / 10
-        if (!redisCache.setCacheIfAbsent("HasBeenSentVCode:$email", timeout, timeout)) {
+        if (!redisCache.setCacheIfAbsent("HasBeenSentVCode:$email", timeout, timeout.seconds)) {
             // 设置失败，说明 key 已存在
             throw MaaResultException(403, "发送验证码的请求至少需要间隔 $timeout 秒")
         }
@@ -88,7 +89,7 @@ class EmailService(
             }
         }
         // 存redis
-        redisCache.setCache("vCodeEmail:$email", vCode, maaCopilotProperties.vcode.expire)
+        redisCache.setCache("vCodeEmail:$email", vCode, maaCopilotProperties.vcode.expire.seconds)
     }
 
     /**

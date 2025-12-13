@@ -1,9 +1,12 @@
 package plus.maa.backend.repository.entity.github
 
+import kotlinx.serialization.Serializable
+
 /**
  * @author dragove
  * created on 2022/12/23
  */
+@Serializable
 data class GithubContent(
     // 文件名
     val name: String,

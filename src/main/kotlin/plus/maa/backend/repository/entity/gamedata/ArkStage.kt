@@ -1,5 +1,8 @@
 package plus.maa.backend.repository.entity.gamedata
 
+import kotlinx.serialization.Serializable
+
+@Serializable
 data class ArkStage(
     /**
      * 关卡ID, 需转换为全小写后使用<br></br>

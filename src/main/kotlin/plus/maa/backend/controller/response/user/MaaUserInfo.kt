@@ -1,5 +1,6 @@
 package plus.maa.backend.controller.response.user
 
+import kotlinx.serialization.Serializable
 import plus.maa.backend.repository.entity.MaaUser
 import plus.maa.backend.repository.entity.UserEntity
 
@@ -8,6 +9,7 @@ import plus.maa.backend.repository.entity.UserEntity
  *
  * @author AnselYuki
  */
+@Serializable
 data class MaaUserInfo(
     val id: String,
     val userName: String,

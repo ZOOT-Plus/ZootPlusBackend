@@ -1,10 +1,11 @@
 package plus.maa.backend.controller.response.copilot
 
-import java.io.Serializable
+import kotlinx.serialization.Serializable
 
 /**
  * @author john180
  */
+@Serializable
 data class ArkLevelInfo(
     val levelId: String,
     val stageId: String,
@@ -14,4 +15,4 @@ data class ArkLevelInfo(
     val name: String,
     val width: Int = 0,
     val height: Int = 0,
-) : Serializable
+)

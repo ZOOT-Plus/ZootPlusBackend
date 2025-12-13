@@ -2,6 +2,7 @@ package plus.maa.backend.controller.request.copilotset
 
 import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.constraints.NotNull
+import kotlinx.serialization.Serializable
 import plus.maa.backend.service.model.CopilotSetStatus
 
 /**
@@ -9,6 +10,7 @@ import plus.maa.backend.service.model.CopilotSetStatus
  * create on 2024-01-02
  */
 @Schema(title = "作业集更新请求")
+@Serializable
 data class CopilotSetUpdateReq(
     @field:NotNull(message = "作业集id不能为空")
     val id: Long,

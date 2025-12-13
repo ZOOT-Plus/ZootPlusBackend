@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.constraints.Max
 import jakarta.validation.constraints.Positive
 import jakarta.validation.constraints.PositiveOrZero
+import kotlinx.serialization.Serializable
 import org.springframework.web.bind.annotation.BindParam
 
 /**
@@ -11,6 +12,7 @@ import org.springframework.web.bind.annotation.BindParam
  * create on 2024-01-06
  */
 @Schema(title = "作业集列表查询接口参数")
+@Serializable
 data class CopilotSetQuery(
     @field:Schema(title = "页码")
     @field:Positive(message = "页码必须为大于0的数字")

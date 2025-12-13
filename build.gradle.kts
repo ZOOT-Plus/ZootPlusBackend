@@ -13,6 +13,7 @@ plugins {
     val ktVersion = "2.2.0"
     kotlin("jvm") version ktVersion
     kotlin("plugin.spring") version ktVersion
+    kotlin("plugin.serialization") version ktVersion
     kotlin("kapt") version ktVersion
 
     id("org.jlleitschuh.gradle.ktlint") version "13.0.0"
@@ -68,10 +69,10 @@ dependencies {
     kapt("com.github.therapi:therapi-runtime-javadoc-scribe:0.15.0")
 
     // kotlin
-    implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test")
 
     // kotlin-logging
@@ -80,7 +81,6 @@ dependencies {
     // ktorm connect with spring-jdbc
     implementation("org.springframework.boot:spring-boot-starter-jdbc")
     implementation("org.ktorm:ktorm-core:$ktormVersion")
-    implementation("org.ktorm:ktorm-jackson:$ktormVersion")
     implementation("org.ktorm:ktorm-support-postgresql:$ktormVersion")
     implementation("org.postgresql:postgresql:42.7.7")
     // hutool 的邮箱工具类依赖
@@ -100,8 +100,6 @@ dependencies {
     implementation("org.freemarker:freemarker:2.3.34")
     implementation("com.github.ben-manes.caffeine:caffeine:3.2.2")
     implementation("com.networknt:json-schema-validator:1.5.8")
-
-    implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310")
 
     swaggerCodegen("org.openapitools:openapi-generator-cli:7.14.0")
 
