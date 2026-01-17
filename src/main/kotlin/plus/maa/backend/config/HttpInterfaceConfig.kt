@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.PropertyNamingStrategies
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.http.HttpHeaders
+import org.springframework.http.client.reactive.ReactorClientHttpConnector
 import org.springframework.http.codec.ClientCodecConfigurer
 import org.springframework.http.codec.json.Jackson2JsonDecoder
 import org.springframework.http.codec.json.Jackson2JsonEncoder
@@ -13,7 +14,10 @@ import org.springframework.web.reactive.function.client.ExchangeStrategies
 import org.springframework.web.reactive.function.client.WebClient
 import org.springframework.web.reactive.function.client.support.WebClientAdapter
 import org.springframework.web.service.invoker.HttpServiceProxyFactory
+import org.springframework.web.service.invoker.createClient
 import plus.maa.backend.repository.GithubRepository
+import reactor.netty.http.client.HttpClient
+import java.time.Duration
 
 @Configuration
 class HttpInterfaceConfig {
@@ -38,6 +42,12 @@ class HttpInterfaceConfig {
                     }
                     .build(),
             )
+            .clientConnector(
+                ReactorClientHttpConnector(
+                    HttpClient.create().proxyWithSystemProperties()
+                        .responseTimeout(Duration.ofSeconds(30))
+                )
+            )
             .defaultHeaders { headers: HttpHeaders ->
                 headers.add("Accept", "application/vnd.github+json")
                 headers.add("X-GitHub-Api-Version", "2022-11-28")
@@ -45,6 +55,6 @@ class HttpInterfaceConfig {
             .build()
         return HttpServiceProxyFactory.builderFor(WebClientAdapter.create(client))
             .build()
-            .createClient(GithubRepository::class.java)
+            .createClient<GithubRepository>()
     }
 }

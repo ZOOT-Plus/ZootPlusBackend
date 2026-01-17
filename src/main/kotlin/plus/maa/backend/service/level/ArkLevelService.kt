@@ -34,6 +34,7 @@ import plus.maa.backend.repository.ktorm.ArkLevelKtormRepository
 import reactor.netty.http.client.HttpClient
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import java.time.Duration
 import java.time.LocalDateTime
 import java.time.ZoneOffset
 import java.util.concurrent.atomic.AtomicInteger
@@ -57,7 +58,12 @@ class ArkLevelService(
     private val github = properties.github
     private val webClient =
         webClientBuilder.uriBuilderFactory(DefaultUriBuilderFactory().apply { encodingMode = DefaultUriBuilderFactory.EncodingMode.NONE })
-            .clientConnector(ReactorClientHttpConnector(HttpClient.create().proxyWithSystemProperties()))
+            .clientConnector(
+                ReactorClientHttpConnector(
+                    HttpClient.create().proxyWithSystemProperties()
+                        .responseTimeout(Duration.ofSeconds(30))
+                )
+            )
             .build()
     private val fetchDataHolder = lazySuspend { ArkGameDataHolder.fetch(webClient) }
     private val fetchLevelParser = lazySuspend { ArkLevelParserDelegate(fetchDataHolder()) }
