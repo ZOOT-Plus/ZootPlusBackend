@@ -194,12 +194,9 @@ class CopilotSetService(
             }
         }
 
-        // 默认热度排序
+        // 默认id倒序
         val copilotSets = sequence
-            .sortedBy(
-                { it.hotScore.desc() },
-                { it.id.asc() },
-            )
+            .sortedBy { it.id.desc() }
             .drop(offset)
             .take(limit)
             .toList()

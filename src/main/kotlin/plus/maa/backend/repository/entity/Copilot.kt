@@ -78,7 +78,7 @@ class Copilot(
     @Serializable
     data class Operators(
         // 干员名
-        var name: String? = null,
+        var name: String,
         // 技能序号。可选，默认 1
         var skill: Int = 1,
         // 技能用法。可选，默认 0

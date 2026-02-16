@@ -8,6 +8,8 @@ import kotlinx.serialization.json.jsonObject
 import org.ktorm.database.Database
 import org.ktorm.dsl.and
 import org.ktorm.dsl.asc
+import org.ktorm.dsl.batchInsert
+import org.ktorm.dsl.delete
 import org.ktorm.dsl.desc
 import org.ktorm.dsl.eq
 import org.ktorm.dsl.from
@@ -107,7 +109,7 @@ class CopilotService(
             }
         }
         opers?.forEach { operator: Copilot.Operators ->
-            operator.name = operator.name?.removeQuotes()
+            operator.name = operator.name.removeQuotes()
         }
         // actions name 不是必须
         actions?.forEach { action: Copilot.Action ->
@@ -146,9 +148,19 @@ class CopilotService(
             this.deleteTime = null
             this.notification = false
         }
+        copilotKtormRepository.insertEntity(entity)
         val copilotId = entity.copilotId
 
-        copilotKtormRepository.insertEntity(entity)
+        if (!dto.opers.isNullOrEmpty()) {
+            database.batchInsert(Operators) {
+                dto.opers.map { op ->
+                    item {
+                        set(it.copilotId, copilotId)
+                        set(it.name, op.name)
+                    }
+                }
+            }
+        }
         segmentService.updateIndex(copilotId, entity.title, entity.details)
         return copilotId
     }
@@ -381,12 +393,13 @@ class CopilotService(
             request.copilotIds.isNullOrEmpty()
         ) {
             val r = copilotsSeq.toList()
-            val count = r.count()
+            val count = copilotsSeq.totalRecordsInAllPages
             val hasNext = count > (page * limit)
             (r to count) to hasNext
         } else {
             val r = copilotsSeq.toList()
-            (r to 0) to (r.size >= limit)
+            val count = copilotsSeq.totalRecordsInAllPages
+            (r to count) to (r.size >= limit)
         }
 
         val count = resultAgg.first.second
@@ -468,13 +481,13 @@ class CopilotService(
     fun update(loginUserId: Long, request: CopilotCUDRequest) {
         var cIdToDeleteCache: Long? = null
 
+        val dto = request.content.parseToCopilotDto()
         userEditCopilot(loginUserId, request.id) {
             segmentService.removeIndex(copilotId, title, details)
 
             // 从公开改为隐藏时，如果数据存在缓存中则需要清除缓存
             if (status == CopilotSetStatus.PUBLIC && request.status == CopilotSetStatus.PRIVATE) cIdToDeleteCache = copilotId
 
-            val dto = request.content.parseToCopilotDto()
             stageName = dto.stageName
             title = dto.doc?.title ?: title
             details = dto.doc?.details ?: details
@@ -484,6 +497,19 @@ class CopilotService(
         }.apply {
             Cache.invalidateCopilotInfoByCid(copilotId)
             segmentService.updateIndex(copilotId, title, details)
+            database.delete(Operators) {
+                it.copilotId eq copilotId
+            }
+            if (!dto.opers.isNullOrEmpty()) {
+                database.batchInsert(Operators) {
+                    dto.opers.map { op ->
+                        item {
+                            set(it.copilotId, copilotId)
+                            set(it.name, op.name)
+                        }
+                    }
+                }
+            }
         }
 
         cIdToDeleteCache?.let {
