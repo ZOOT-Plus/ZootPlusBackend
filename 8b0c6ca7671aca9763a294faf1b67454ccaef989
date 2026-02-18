@@ -1,0 +1,23 @@
+src/main/kotlin/plus/maa/backend/common/serialization/JsonSupport.kt
+  9e7f3331be66418a 17-18,57,64
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.3",
+  "base_commit_sha": "8b0c6ca7671aca9763a294faf1b67454ccaef989",
+  "prompts": {
+    "9e7f3331be66418a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_3939da6baffeNSqkrUbg8i9Np5",
+        "model": "unknown"
+      },
+      "human_author": "dragove <dragove@qq.com>",
+      "messages": [],
+      "total_additions": 6,
+      "total_deletions": 6,
+      "accepted_lines": 4,
+      "overriden_lines": 0
+    }
+  }
+}
