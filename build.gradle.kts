@@ -4,13 +4,14 @@ import org.jlleitschuh.gradle.ktlint.reporter.ReporterType
 
 plugins {
     java
-    id("org.springframework.boot") version "3.5.8"
+    id("org.springframework.boot") version "4.0.2"
     id("io.spring.dependency-management") version "1.1.7"
     id("org.springdoc.openapi-gradle-plugin") version "1.9.0"
     id("org.hidetake.swagger.generator") version "2.19.2"
     id("com.gorylenko.gradle-git-properties") version "2.5.2"
+    id("io.freefair.aspectj.post-compile-weaving") version "9.2.0"
 
-    val ktVersion = "2.2.0"
+    val ktVersion = "2.3.10"
     kotlin("jvm") version ktVersion
     kotlin("plugin.spring") version ktVersion
     kotlin("plugin.serialization") version ktVersion
@@ -24,14 +25,14 @@ version = "2.0"
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
+        languageVersion = JavaLanguageVersion.of(25)
     }
 }
 
 kotlin {
     compilerOptions {
         freeCompilerArgs.add("-Xjsr305=strict")
-        jvmTarget = JvmTarget.JVM_21
+        jvmTarget = JvmTarget.JVM_25
     }
 }
 
@@ -49,7 +50,7 @@ repositories {
 
 dependencies {
     val ktormVersion = "4.1.1"
-    val hutoolVersion = "5.8.39"
+    val hutoolVersion = "5.8.43"
     val mapstructVersion = "1.6.3"
 
     kapt("org.springframework.boot:spring-boot-configuration-processor")
@@ -57,6 +58,8 @@ dependencies {
     testImplementation("io.mockk:mockk:1.14.4")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
 
+    implementation("org.aspectj:aspectjrt:1.9.25.1")
+    implementation("org.springframework:spring-aspects")
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-webflux")
     implementation("org.springframework.boot:spring-boot-starter-security")
@@ -64,7 +67,7 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-cache")
 
-    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.9")
+    implementation("org.springdoc:springdoc-openapi-starter-webmvc-scalar:3.0.1")
     implementation("com.github.therapi:therapi-runtime-javadoc:0.15.0")
     kapt("com.github.therapi:therapi-runtime-javadoc-scribe:0.15.0")
 

@@ -103,7 +103,7 @@ class UserService(
             }
         }
         // 修改密码的逻辑，应当使用与 authentication provider 一致的编码器
-        userEntity.password = passwordEncoder.encode(rawPassword)
+        userEntity.password = passwordEncoder.encode(rawPassword)!!
         // 更新密码时，如果用户未启用则自动启用
         if (userEntity.status == 0) {
             userEntity.status = 1
@@ -129,7 +129,7 @@ class UserService(
         // 校验验证码
         emailService.verifyVCode(registerDTO.email, registerDTO.registrationToken)
 
-        val encoded = passwordEncoder.encode(registerDTO.password)
+        val encoded = passwordEncoder.encode(registerDTO.password)!!
 
         val user = MaaUser(
             userName = userName,
@@ -264,7 +264,6 @@ class UserService(
 
     class UserDict(users: List<MaaUser>) {
         private val userMap = users.associateBy { it.userId!! }
-        fun entries() = userMap.entries
         operator fun get(id: Long): MaaUser? = userMap[id.toString()]
         fun getOrDefault(id: Long) = get(id) ?: MaaUser.UNKNOWN
     }

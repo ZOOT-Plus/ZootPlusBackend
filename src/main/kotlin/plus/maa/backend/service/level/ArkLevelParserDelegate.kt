@@ -1,7 +1,6 @@
 package plus.maa.backend.service.level
 
 import io.github.oshai.kotlinlogging.KotlinLogging
-import org.springframework.lang.Nullable
 import plus.maa.backend.repository.entity.ArkLevel
 import plus.maa.backend.repository.entity.gamedata.ArkTilePos
 import plus.maa.backend.service.level.parser.ActivityParser
@@ -35,7 +34,6 @@ class ArkLevelParserDelegate(holder: ArkGameDataHolder) {
      * 尚未全部实现 <br></br>
      * TODO 完成剩余字段实现
      */
-    @Nullable
     fun parseLevel(tilePos: ArkTilePos, sha: String): ArkLevel? {
         val level = ArkLevel(
             levelId = tilePos.levelId,

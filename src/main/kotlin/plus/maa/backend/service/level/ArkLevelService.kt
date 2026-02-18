@@ -52,7 +52,6 @@ class ArkLevelService(
     json: Json,
     private val arkLevelConverter: ArkLevelConverter,
     private val arkLevelEntityConverter: ArkLevelEntityConverter,
-    webClientBuilder: WebClient.Builder,
 ) {
     @OptIn(ExperimentalSerializationApi::class)
     private val json = Json(from = json) {
@@ -61,7 +60,7 @@ class ArkLevelService(
     private val log = KotlinLogging.logger { }
     private val github = properties.github
     private val webClient =
-        webClientBuilder.uriBuilderFactory(DefaultUriBuilderFactory().apply { encodingMode = DefaultUriBuilderFactory.EncodingMode.NONE })
+        WebClient.builder().uriBuilderFactory(DefaultUriBuilderFactory().apply { encodingMode = DefaultUriBuilderFactory.EncodingMode.NONE })
             .clientConnector(
                 ReactorClientHttpConnector(
                     HttpClient.create().proxyWithSystemProperties()

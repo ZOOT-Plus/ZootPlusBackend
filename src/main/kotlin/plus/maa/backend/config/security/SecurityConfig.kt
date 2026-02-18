@@ -98,6 +98,7 @@ class SecurityConfig(
                 "/user/password/reset",
                 "/user/refresh",
                 "/swagger-ui.html",
+                "/scalar/**",
                 "/v3/api-docs/**",
                 "/swagger-ui/**",
                 "/arknights/level",

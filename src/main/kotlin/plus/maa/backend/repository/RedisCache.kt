@@ -2,9 +2,7 @@ package plus.maa.backend.repository
 
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.serialization.SerializationException
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
-import org.apache.commons.lang3.StringUtils
+import org.apache.commons.lang3.Strings
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.core.io.ClassPathResource
 import org.springframework.dao.InvalidDataAccessApiUsageException
@@ -40,9 +38,6 @@ class RedisCache(
     annotation class RedisCacheInternalApi
 
     @RedisCacheInternalApi
-    final val json: Json = defaultJson
-
-    @RedisCacheInternalApi
     final val expire = expire.seconds
 
 
@@ -57,7 +52,7 @@ class RedisCache(
 
     // 比较与输入的键值对是否相同，相同则删除
     @RedisCacheInternalApi
-    val removeKVIfEqualsScript: RedisScript<Boolean?> = RedisScript.of(
+    val removeKVIfEqualsScript: RedisScript<Boolean> = RedisScript.of(
         ClassPathResource("redis-lua/removeKVIfEquals.lua"),
         Boolean::class.java,
     )
@@ -138,7 +133,7 @@ class RedisCache(
      * @param size     ZSet 的相对大小
      * @param timeout  ZSet 的过期时间
      */
-    fun incZSet(key: String, member: String?, incScore: Double, size: Long, timeout: Long) {
+    fun incZSet(key: String, member: String, incScore: Double, size: Long, timeout: Long) {
         redisTemplate.execute(
             incZSetRedisScript,
             listOf(key),
@@ -194,7 +189,7 @@ class RedisCache(
                     }
                 }
             }
-            return cached?.let { json.decodeFromString<T>(it) }
+            return cached?.let { defaultJson.decodeFromString<T>(it) }
         } catch (e: Exception) {
             log.error(e) { e.message }
             return null
@@ -209,7 +204,7 @@ class RedisCache(
                 result = if (cached.isNullOrEmpty()) {
                     defaultValue
                 } else {
-                    json.decodeFromString(cached)
+                    defaultJson.decodeFromString(cached)
                 }
                 result = onUpdate(result)
                 setCache(key, result, timeout)
@@ -229,7 +224,7 @@ class RedisCache(
         if (!notUseUnlink && supportUnlink.get()) {
             val exceptionHandler = { e: Exception ->
                 val cause = e.cause
-                if (cause == null || !StringUtils.containsAny(
+                if (cause == null || !Strings.CS.containsAny(
                         cause.message,
                         "unknown command",
                         "not support",
@@ -265,7 +260,6 @@ class RedisCache(
      */
     final inline fun <reified T> removeKVIfEquals(key: String, value: T): Boolean {
         val json = getJson(value) ?: return false
-        @Suppress("SimplifyBooleanWithConstants")
         return redisTemplate.execute(removeKVIfEqualsScript, listOf(key), json) == true
     }
 
@@ -323,7 +317,7 @@ class RedisCache(
     @RedisCacheInternalApi
     final inline fun <reified T> getJson(value: T): String? =
         try {
-            json.encodeToString(value)
+            defaultJson.encodeToString(value)
         } catch (e: SerializationException) {
             log.debug { e.message }
             null

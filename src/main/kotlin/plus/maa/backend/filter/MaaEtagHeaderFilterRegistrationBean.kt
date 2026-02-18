@@ -1,6 +1,5 @@
 package plus.maa.backend.filter
 
-import jakarta.annotation.PostConstruct
 import jakarta.servlet.Filter
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
@@ -16,10 +15,8 @@ import java.io.InputStream
  * @author lixuhuilll
  */
 @Component
-class MaaEtagHeaderFilterRegistrationBean : FilterRegistrationBean<Filter>() {
-    @PostConstruct
-    fun init() {
-        filter = MaaEtagHeaderFilter()
+class MaaEtagHeaderFilterRegistrationBean : FilterRegistrationBean<Filter>(MaaEtagHeaderFilter()) {
+    init {
         urlPatterns = ETAG_URI
     }
 

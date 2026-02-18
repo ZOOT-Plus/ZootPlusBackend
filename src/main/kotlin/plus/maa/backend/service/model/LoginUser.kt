@@ -9,9 +9,9 @@ import plus.maa.backend.repository.entity.MaaUser
  */
 class LoginUser(
     private val maaUser: MaaUser,
-    private val authorities: Collection<GrantedAuthority?>,
+    private val authorities: Collection<GrantedAuthority>,
 ) : UserDetails {
-    override fun getAuthorities(): Collection<GrantedAuthority?> = authorities
+    override fun getAuthorities(): Collection<GrantedAuthority> = authorities
 
     override fun getPassword(): String = maaUser.password
 

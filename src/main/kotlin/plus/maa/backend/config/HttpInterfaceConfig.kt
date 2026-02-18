@@ -8,6 +8,7 @@ import org.springframework.context.annotation.Configuration
 import org.springframework.http.HttpHeaders
 import org.springframework.http.client.reactive.ReactorClientHttpConnector
 import org.springframework.http.codec.ClientCodecConfigurer
+import org.springframework.http.codec.json.KotlinSerializationJsonDecoder
 import org.springframework.http.codec.json.KotlinSerializationJsonEncoder
 import org.springframework.web.reactive.function.client.ExchangeStrategies
 import org.springframework.web.reactive.function.client.WebClient
@@ -36,6 +37,8 @@ class HttpInterfaceConfig {
                     .codecs { codecs: ClientCodecConfigurer ->
                         codecs.defaultCodecs()
                             .kotlinSerializationJsonEncoder(KotlinSerializationJsonEncoder(json))
+                        codecs.defaultCodecs()
+                            .kotlinSerializationJsonDecoder(KotlinSerializationJsonDecoder(json))
                         // 最大 20MB
                         codecs.defaultCodecs().maxInMemorySize(20 * 1024 * 1024)
                     }

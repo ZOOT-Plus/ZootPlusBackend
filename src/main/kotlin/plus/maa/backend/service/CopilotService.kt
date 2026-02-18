@@ -1,7 +1,6 @@
 package plus.maa.backend.service
 
 import io.github.oshai.kotlinlogging.KotlinLogging
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
@@ -447,7 +446,7 @@ class CopilotService(
         // 新版评分系统
         // 反正目前首页和搜索不会直接展示当前用户有没有点赞，干脆直接不查，要用户点进作业才显示自己是否点赞
         val infos = copilots.map { copilot ->
-            val contentObj = json.parseToJsonElement(copilot.content ?: "{}").jsonObject
+            val contentObj = json.parseToJsonElement(copilot.content).jsonObject
             val slimContent = buildJsonObject {
                 contentObj.forEach { (key, value) ->
                     if (key != "actions") put(key, value)

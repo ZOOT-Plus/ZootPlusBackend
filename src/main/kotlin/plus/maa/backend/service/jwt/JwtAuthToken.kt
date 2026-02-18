@@ -37,7 +37,7 @@ class JwtAuthToken : JwtToken, Authentication {
     override fun getAuthorities(): Collection<GrantedAuthority> {
         val authorityStrings = jwt.payloads.getStr(CLAIM_AUTHORITIES)
         return StringUtils.commaDelimitedListToSet(authorityStrings)
-            .map { role: String? -> SimpleGrantedAuthority(role) }
+            .map { role: String -> SimpleGrantedAuthority(role) }
     }
 
     fun setAuthorities(authorities: Collection<GrantedAuthority>) {
