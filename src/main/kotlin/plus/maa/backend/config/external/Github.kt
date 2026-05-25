@@ -8,7 +8,7 @@ data class Github(
     /**
      * maa 主仓库和分支
      */
-    var repoAndBranch: String = "MaaAssistantArknights/MaaAssistantArknights/dev",
+    var repoAndBranch: String = "MaaAssistantArknights/MaaResource/main",
     /**
      * 地图数据所在路径（相对于分支内容）
      */
