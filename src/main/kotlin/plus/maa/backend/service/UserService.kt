@@ -104,10 +104,6 @@ class UserService(
         }
         // 修改密码的逻辑，应当使用与 authentication provider 一致的编码器
         userEntity.password = passwordEncoder.encode(rawPassword)!!
-        // 更新密码时，如果用户未启用则自动启用
-        if (userEntity.status == 0) {
-            userEntity.status = 1
-        }
         userEntity.pwdUpdateTime = Instant.now()
         userKtormRepository.save(userEntity)
         Cache.invalidateMaaUserById(userId.toString())
