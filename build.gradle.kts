@@ -4,20 +4,20 @@ import org.jlleitschuh.gradle.ktlint.reporter.ReporterType
 
 plugins {
     java
-    id("org.springframework.boot") version "4.0.2"
+    id("org.springframework.boot") version "4.0.6"
     id("io.spring.dependency-management") version "1.1.7"
     id("org.springdoc.openapi-gradle-plugin") version "1.9.0"
     id("org.hidetake.swagger.generator") version "2.19.2"
-    id("com.gorylenko.gradle-git-properties") version "2.5.2"
-    id("io.freefair.aspectj.post-compile-weaving") version "9.2.0"
+    id("com.gorylenko.gradle-git-properties") version "3.0.2"
+    id("io.freefair.aspectj.post-compile-weaving") version "9.5.0"
 
-    val ktVersion = "2.3.10"
+    val ktVersion = "2.3.21"
     kotlin("jvm") version ktVersion
     kotlin("plugin.spring") version ktVersion
     kotlin("plugin.serialization") version ktVersion
     kotlin("kapt") version ktVersion
 
-    id("org.jlleitschuh.gradle.ktlint") version "13.0.0"
+    id("org.jlleitschuh.gradle.ktlint") version "14.2.0"
 }
 
 group = "plus.zoot"
@@ -67,7 +67,7 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-cache")
 
-    implementation("org.springdoc:springdoc-openapi-starter-webmvc-scalar:3.0.1")
+    implementation("org.springdoc:springdoc-openapi-starter-webmvc-scalar:3.0.3")
     implementation("com.github.therapi:therapi-runtime-javadoc:0.15.0")
     kapt("com.github.therapi:therapi-runtime-javadoc-scribe:0.15.0")
 
@@ -79,7 +79,7 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test")
 
     // kotlin-logging
-    implementation("io.github.oshai:kotlin-logging-jvm:7.0.7")
+    implementation("io.github.oshai:kotlin-logging-jvm:8.0.03")
 
     // ktorm connect with spring-jdbc
     implementation("org.springframework.boot:spring-boot-starter-jdbc")
@@ -104,7 +104,7 @@ dependencies {
     implementation("com.github.ben-manes.caffeine:caffeine:3.2.2")
     implementation("com.networknt:json-schema-validator:1.5.8")
 
-    swaggerCodegen("org.openapitools:openapi-generator-cli:7.14.0")
+    swaggerCodegen("org.openapitools:openapi-generator-cli:7.22.0")
 
     implementation("com.belerweb:pinyin4j:2.5.0")
 }
