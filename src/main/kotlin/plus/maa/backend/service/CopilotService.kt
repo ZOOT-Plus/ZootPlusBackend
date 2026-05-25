@@ -14,9 +14,11 @@ import org.ktorm.dsl.eq
 import org.ktorm.dsl.from
 import org.ktorm.dsl.inList
 import org.ktorm.dsl.like
+import org.ktorm.dsl.map
 import org.ktorm.dsl.notInList
 import org.ktorm.dsl.select
 import org.ktorm.dsl.where
+import org.ktorm.entity.count
 import org.ktorm.entity.drop
 import org.ktorm.entity.filter
 import org.ktorm.entity.forEach
@@ -231,14 +233,23 @@ class CopilotService(
         val setKey = AtomicReference<String>()
         // 只缓存默认状态下热度和访问量排序的结果，并且最多只缓存前三页
         val keyword = request.document?.trim()
-        if (request.page <= 3 &&
+        val canUseHomeCache = request.page <= 3 &&
             keyword.isNullOrEmpty() &&
             request.levelKeyword.isNullOrBlank() &&
             request.uploaderId.isNullOrBlank() &&
             request.operator.isNullOrBlank() &&
             request.copilotIds.isNullOrEmpty() &&
             !request.onlyFollowing
-        ) {
+        val followingUserIds: List<Long?>? = if (userId != null && !request.onlyFollowing) {
+            database.from(UserFollows)
+                .select(UserFollows.followUserId)
+                .where { UserFollows.userId eq userId }
+                .map { row -> row[UserFollows.followUserId] }
+        } else {
+            null
+        }
+        val prioritizeFollowing = !followingUserIds.isNullOrEmpty()
+        if (canUseHomeCache && !prioritizeFollowing) {
             request.orderBy?.blankAsNull()
                 ?.let { key -> HOME_PAGE_CACHE_CONFIG[key] }
                 ?.let { t ->
@@ -329,7 +340,13 @@ class CopilotService(
             }
         }
 
-        val copilotsSeq = database.copilots.filter {
+        val followingUploaderIdQuery = userId?.let {
+            database.from(UserFollows)
+                .select(UserFollows.followUserId)
+                .where { UserFollows.userId eq it }
+        }
+
+        val filteredCopilotsSeq = database.copilots.filter {
             val conditions = ArrayList<ColumnDeclaring<Boolean>>()
             conditions += ArgumentExpression(true, BooleanSqlType)
             conditions += it.delete eq false
@@ -348,12 +365,8 @@ class CopilotService(
             if (inCopilotIds != null) {
                 conditions += it.copilotId inList inCopilotIds
             }
-            if (request.onlyFollowing && userId != null) {
-                conditions += it.uploaderId inList (
-                    database.from(UserFollows)
-                        .select(UserFollows.followUserId)
-                        .where { UserFollows.userId eq userId }
-                    )
+            if (request.onlyFollowing && followingUploaderIdQuery != null) {
+                conditions += it.uploaderId inList followingUploaderIdQuery
             }
             if (includeOps != null) {
                 conditions += it.copilotId inList (
@@ -370,19 +383,30 @@ class CopilotService(
                     )
             }
             conditions.reduce { a, b -> a and b }
-        }.sortedBy {
-            val ord = when (request.orderBy ?: "id") {
-                "hot" -> it.hotScore
-                "id" -> it.copilotId
-                "views" -> it.views
-                else -> it.copilotId
-            }
-            if (request.desc) {
-                ord.desc()
-            } else {
-                ord.asc()
-            }
-        }.drop((page - 1) * limit).take(limit)
+        }
+
+        val copilotsSeq = filteredCopilotsSeq.sortedBy(
+            {
+                if (prioritizeFollowing && followingUploaderIdQuery != null) {
+                    (it.uploaderId inList followingUploaderIdQuery).desc()
+                } else {
+                    ArgumentExpression(true, BooleanSqlType).desc()
+                }
+            },
+            {
+                val ord = when (request.orderBy ?: "id") {
+                    "hot" -> it.hotScore
+                    "id" -> it.copilotId
+                    "views" -> it.views
+                    else -> it.copilotId
+                }
+                if (request.desc) {
+                    ord.desc()
+                } else {
+                    ord.asc()
+                }
+            },
+        ).drop((page - 1) * limit).take(limit)
 
         val resultAgg = if (keyword.isNullOrEmpty() &&
             request.levelKeyword.isNullOrBlank() &&
@@ -392,13 +416,14 @@ class CopilotService(
             request.copilotIds.isNullOrEmpty()
         ) {
             val r = copilotsSeq.toList()
-            val count = copilotsSeq.totalRecordsInAllPages
+            val count = filteredCopilotsSeq.count()
             val hasNext = count > (page * limit)
             (r to count) to hasNext
         } else {
             val r = copilotsSeq.toList()
-            val count = copilotsSeq.totalRecordsInAllPages
-            (r to count) to (r.size >= limit)
+            val count = filteredCopilotsSeq.count()
+            val hasNext = count > (page * limit)
+            (r to count) to hasNext
         }
 
         val count = resultAgg.first.second
