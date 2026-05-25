@@ -231,6 +231,18 @@ class CopilotService(
         val cacheTimeout = AtomicLong()
         val cacheKey = AtomicReference<String?>()
         val setKey = AtomicReference<String>()
+
+        val followedUserIds: List<Long> = if (userId != null) {
+            database.from(UserFollows)
+                .select(UserFollows.followUserId)
+                .where { UserFollows.userId eq userId }
+                .map { row -> row[UserFollows.followUserId] }
+                .filterNotNull()
+        } else {
+            emptyList()
+        }
+        val prioritizeFollowing = followedUserIds.isNotEmpty()
+
         // 只缓存默认状态下热度和访问量排序的结果，并且最多只缓存前三页
         val keyword = request.document?.trim()
         val canUseHomeCache = request.page <= 3 &&
@@ -240,15 +252,7 @@ class CopilotService(
             request.operator.isNullOrBlank() &&
             request.copilotIds.isNullOrEmpty() &&
             !request.onlyFollowing
-        val followingUserIds: List<Long?>? = if (userId != null && !request.onlyFollowing) {
-            database.from(UserFollows)
-                .select(UserFollows.followUserId)
-                .where { UserFollows.userId eq userId }
-                .map { row -> row[UserFollows.followUserId] }
-        } else {
-            null
-        }
-        val prioritizeFollowing = !followingUserIds.isNullOrEmpty()
+
         if (canUseHomeCache && !prioritizeFollowing) {
             request.orderBy?.blankAsNull()
                 ?.let { key -> HOME_PAGE_CACHE_CONFIG[key] }
@@ -340,12 +344,6 @@ class CopilotService(
             }
         }
 
-        val followingUploaderIdQuery = userId?.let {
-            database.from(UserFollows)
-                .select(UserFollows.followUserId)
-                .where { UserFollows.userId eq it }
-        }
-
         val filteredCopilotsSeq = database.copilots.filter {
             val conditions = ArrayList<ColumnDeclaring<Boolean>>()
             conditions += ArgumentExpression(true, BooleanSqlType)
@@ -365,8 +363,13 @@ class CopilotService(
             if (inCopilotIds != null) {
                 conditions += it.copilotId inList inCopilotIds
             }
-            if (request.onlyFollowing && followingUploaderIdQuery != null) {
-                conditions += it.uploaderId inList followingUploaderIdQuery
+            if (request.onlyFollowing) {
+                if (followedUserIds.isNotEmpty()) {
+                    conditions += it.uploaderId inList followedUserIds
+                } else {
+                    // 如果要求只看关注但没关注任何人，直接构造一个永远为假的条件或返回空
+                    conditions += ArgumentExpression(false, BooleanSqlType)
+                }
             }
             if (includeOps != null) {
                 conditions += it.copilotId inList (
@@ -387,8 +390,8 @@ class CopilotService(
 
         val copilotsSeq = filteredCopilotsSeq.sortedBy(
             {
-                if (prioritizeFollowing && followingUploaderIdQuery != null) {
-                    (it.uploaderId inList followingUploaderIdQuery).desc()
+                if (prioritizeFollowing && !request.onlyFollowing) {
+                    (it.uploaderId inList followedUserIds).desc()
                 } else {
                     ArgumentExpression(true, BooleanSqlType).desc()
                 }
@@ -408,35 +411,18 @@ class CopilotService(
             },
         ).drop((page - 1) * limit).take(limit)
 
-        val resultAgg = if (keyword.isNullOrEmpty() &&
-            request.levelKeyword.isNullOrBlank() &&
-            request.uploaderId != null &&
-            request.uploaderId != ME &&
-            request.operator.isNullOrBlank() &&
-            request.copilotIds.isNullOrEmpty()
-        ) {
-            val r = copilotsSeq.toList()
-            val count = filteredCopilotsSeq.count()
-            val hasNext = count > (page * limit)
-            (r to count) to hasNext
-        } else {
-            val r = copilotsSeq.toList()
-            val count = filteredCopilotsSeq.count()
-            val hasNext = count > (page * limit)
-            (r to count) to hasNext
-        }
-
-        val count = resultAgg.first.second
-        val copilots: List<CopilotEntity> = resultAgg.first.first
-        val hasNext = resultAgg.second
+        // 执行查询
+        val copilots = copilotsSeq.toList()
+        val count = filteredCopilotsSeq.count()
+        val hasNext = count > (page * limit)
 
         val userIds = copilots.map { it.uploaderId }
 
         // 填充前端所需信息
         val maaUsers = hashMapOf<Long, UserEntity>()
-        val remainingUserIds = userIds.filter { userId ->
-            val info = Cache.getMaaUserCache(userId.toString())?.also {
-                maaUsers[userId] = it
+        val remainingUserIds = userIds.filter { uId ->
+            val info = Cache.getMaaUserCache(uId.toString())?.also {
+                maaUsers[uId] = it
             }
             info == null
         }.toList()
@@ -462,9 +448,9 @@ class CopilotService(
                 .groupBy { it.copilotId }
                 .mapValues { it.value.size.toLong() }
             copilotIds.forEach { copilotId ->
-                val count = existedCount[copilotId] ?: 0
-                commentsCount[copilotId] = count
-                Cache.setCommentCountCache(copilotId, count)
+                val cCount = existedCount[copilotId] ?: 0
+                commentsCount[copilotId] = cCount
+                Cache.setCommentCountCache(copilotId, cCount)
             }
         }
 
