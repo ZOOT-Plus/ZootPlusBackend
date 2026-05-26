@@ -18,6 +18,8 @@ class SensitiveWordService(
     private val log = KotlinLogging.logger {}
     private val wordTree = WordTree().apply {
         StopChar.STOP_WORD.remove('/')
+        StopChar.STOP_WORD.remove('(')
+        StopChar.STOP_WORD.remove(')')
         val path = maaCopilotProperties.sensitiveWord.path
         try {
             ctx.getResource(path).inputStream.bufferedReader().use { it.lines().forEach(::addWord) }
