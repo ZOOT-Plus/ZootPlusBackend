@@ -100,7 +100,11 @@ class CopilotService(
         log.error(e) { "解析copilot失败" }
         throw MaaResultException("解析copilot失败")
     }.apply {
-        sensitiveWordService.validate(doc)
+        // 只检测用户输入的文本内容，不检测整个对象序列化（避免 JSON 逗号误报）
+        doc?.let {
+            sensitiveWordService.validate(it.title)
+            it.details?.let { details -> sensitiveWordService.validate(details) }
+        }
         // 去除 name 的冗余部分
         groups?.forEach { group: Copilot.Groups ->
             group.opers?.forEach { oper: OperationGroup ->
