@@ -43,6 +43,14 @@ class UserFollowController(
         userFollowService.unfollow(helper.userId, followUserId),
     )
 
+    @Operation(summary = "查询是否关注某用户")
+    @ApiResponse(description = "是否关注结果")
+    @RequireJwt
+    @GetMapping("/status/{followUserId}")
+    fun isFollowing(@PathVariable followUserId: Long): MaaResult<Boolean> = success(
+        userFollowService.isFollowing(helper.userId, followUserId),
+    )
+
     @Operation(summary = "获取关注列表")
     @ApiResponse(description = "关注列表")
     @RequireJwt

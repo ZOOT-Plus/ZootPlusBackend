@@ -28,6 +28,10 @@ class UserFollowService(
         userKtormRepository.unfollow(userId, followUserId)
     }
 
+    fun isFollowing(userId: Long, followUserId: Long): Boolean {
+        return userKtormRepository.isFollowing(userId, followUserId)
+    }
+
     fun getFollowingList(userId: Long, pageable: Pageable): PageImpl<MaaUserInfo> {
         val res = userKtormRepository.follows(userId).paginate(pageable)
         return PageImpl(res.map { it.toMaaUserInfo() }.toList(), pageable, res.totalElements)

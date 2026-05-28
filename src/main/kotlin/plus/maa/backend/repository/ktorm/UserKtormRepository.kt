@@ -164,6 +164,14 @@ class UserKtormRepository(
         }
     }
 
+    fun isFollowing(userId: Long, followUserId: Long): Boolean {
+        return database.from(UserFollows).select(UserFollows.userId)
+            .where { (UserFollows.userId eq userId) and (UserFollows.followUserId eq followUserId) }
+            .limit(1)
+            .map { it[UserFollows.userId] }
+            .isNotEmpty()
+    }
+
     override fun save(entity: UserEntity): UserEntity {
         return if (isNewEntity(entity)) {
             insertEntity(entity)
