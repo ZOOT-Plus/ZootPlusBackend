@@ -1,4 +1,4 @@
-﻿package plus.maa.backend.service.follow
+package plus.maa.backend.service.follow
 
 import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.Pageable
@@ -35,13 +35,13 @@ class UserFollowService(
         val users = res.toList()
         val targetIds = users.map { it.userId }
         // 查询关注时间
-        val createdAtMap = userKtormRepository.getFollowCreatedAtMap(userId, targetIds)
+        val updatedAtMap = userKtormRepository.getFollowUpdatedAtMap(userId, targetIds)
         // 查询哪些目标也关注了我（用于判断 MUTUAL）
         val mutualIds = userKtormRepository.getFollowerTargetIds(targetIds, userId)
         val enriched = users.map { user ->
             val info = user.toMaaUserInfo()
             val relation = if (user.userId in mutualIds) RelationType.MUTUAL else RelationType.FOLLOWING
-            val followedAt = createdAtMap[user.userId]?.atZone(ZoneId.systemDefault())?.toInstant()
+            val followedAt = updatedAtMap[user.userId]?.atZone(ZoneId.systemDefault())?.toInstant()
             info.copy(relation = relation, followedAt = followedAt)
         }
         return PageImpl(enriched, pageable, res.totalElements)
@@ -52,13 +52,13 @@ class UserFollowService(
         val users = res.toList()
         val fanIds = users.map { it.userId }
         // 批量查询粉丝关注我的时间
-        val fanCreatedAtMap = userKtormRepository.getFansCreatedAtMap(fanIds, userId)
+        val fanUpdatedAtMap = userKtormRepository.getFansUpdatedAtMap(fanIds, userId)
         // 查询我关注了哪些粉丝（用于判断 MUTUAL）
         val iFollowBackIds = userKtormRepository.getFollowedTargetIds(userId, fanIds)
         val enriched = users.map { user ->
             val info = user.toMaaUserInfo()
             val relation = if (user.userId in iFollowBackIds) RelationType.MUTUAL else RelationType.FOLLOWED_BY
-            val followedAt = fanCreatedAtMap[user.userId]?.atZone(ZoneId.systemDefault())?.toInstant()
+            val followedAt = fanUpdatedAtMap[user.userId]?.atZone(ZoneId.systemDefault())?.toInstant()
             info.copy(relation = relation, followedAt = followedAt)
         }
         return PageImpl(enriched, pageable, res.totalElements)

@@ -1,4 +1,4 @@
-﻿package plus.maa.backend.repository.ktorm
+package plus.maa.backend.repository.ktorm
 
 import org.ktorm.database.Database
 import org.ktorm.dsl.and
@@ -168,7 +168,7 @@ class UserKtormRepository(
     /**
      * 查询 userId 关注了 targetIds 中的哪些用户，返回 followUserId -> updatedAt 的映射
      */
-    fun getFollowCreatedAtMap(userId: Long, targetIds: List<Long>): Map<Long, LocalDateTime> {
+    fun getFollowUpdatedAtMap(userId: Long, targetIds: List<Long>): Map<Long, LocalDateTime> {
         if (targetIds.isEmpty()) return emptyMap()
         return database.from(UserFollows)
             .select(UserFollows.followUserId, UserFollows.updatedAt)
@@ -180,7 +180,7 @@ class UserKtormRepository(
     /**
      * 查询 fanIds 中谁关注了 userId，返回 fanId -> updatedAt 的映射
      */
-    fun getFansCreatedAtMap(fanIds: List<Long>, userId: Long): Map<Long, LocalDateTime> {
+    fun getFansUpdatedAtMap(fanIds: List<Long>, userId: Long): Map<Long, LocalDateTime> {
         if (fanIds.isEmpty()) return emptyMap()
         return database.from(UserFollows)
             .select(UserFollows.userId, UserFollows.updatedAt)

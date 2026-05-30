@@ -1,4 +1,4 @@
-﻿package plus.maa.backend.service
+package plus.maa.backend.service
 
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.ktorm.database.Database
@@ -307,14 +307,16 @@ class UserService(
     fun getBatchUserInfos(ids: List<Long>, currentUserId: Long?): List<MaaUserInfo> {
         if (ids.isEmpty()) return emptyList()
         val users = userKtormRepository.findAllById(ids)
+        // 保证结果顺序与输入 ids 一致
+        val userMap = users.associateBy { it.userId }
         if (currentUserId == null) {
-            return users.map { MaaUserInfo(it) }
+            return ids.mapNotNull { userMap[it] }.map { MaaUserInfo(it) }
         }
         // 当前用户关注了哪些目标
         val iFollowIds = userKtormRepository.getFollowedTargetIds(currentUserId, ids)
         // 哪些目标关注了当前用户
         val theyFollowMeIds = userKtormRepository.getFollowerTargetIds(ids, currentUserId)
-        return users.map { user ->
+        return ids.mapNotNull { userMap[it] }.map { user ->
             val uid = user.userId
             val iFollow = uid in iFollowIds
             val theyFollow = uid in theyFollowMeIds
