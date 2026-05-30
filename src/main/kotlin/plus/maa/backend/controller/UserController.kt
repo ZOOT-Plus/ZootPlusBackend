@@ -188,8 +188,7 @@ class UserController(
     @ApiResponse(description = "用户信息列表")
     fun getBatchUserInfo(
         @RequestParam ids: List<Long>,
-        @Max(50, message = "单次查询用户量不能超过50") @RequestParam(defaultValue = "50") size: Int,
-    ): MaaResult<List<MaaUserInfo>> {
+            ): MaaResult<List<MaaUserInfo>> {
         if (ids.size > 50) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "单次查询用户量不能超过50")
         }

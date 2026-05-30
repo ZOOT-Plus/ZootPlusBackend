@@ -120,8 +120,7 @@ class UserService(
      */
     fun register(registerDTO: RegisterDTO): MaaUserInfo {
         val userName = registerDTO.userName.trim()
-        check(userName.length >= 4) { "用户名长度应在4-24位之间" }
-        check(userName.length <= 24) { "用户名长度应在4-24位之间" }
+        check(userName.length in 4..24) { "用户名长度应在4-24位之间" }
         check(!userKtormRepository.existsByUserName(userName)) {
             "用户名已存在，请重新取个名字吧"
         }
@@ -162,8 +161,7 @@ class UserService(
             // 暂时只支持修改用户名，如果有其他字段修改需要同步修改该逻辑
             return
         }
-        check(newName.length >= 4) { "用户名长度应在4-24位之间" }
-        check(newName.length <= 24) { "用户名长度应在4-24位之间" }
+        check(newName.length in 4..24) { "用户名长度应在4-24位之间" }
         // 用户名需要trim
         check(!userKtormRepository.existsByUserName(newName)) {
             "用户名已存在，请重新取个名字吧"
@@ -334,7 +332,7 @@ class UserService(
     /**
      * 解析当前用户与目标用户的关系
      */
-    fun resolveRelation(currentUserId: Long, targetUserId: Long): RelationType {
+    private fun resolveRelation(currentUserId: Long, targetUserId: Long): RelationType {
         if (currentUserId == targetUserId) return RelationType.SELF
         val iFollow = userKtormRepository.isFollowing(currentUserId, targetUserId)
         val theyFollow = userKtormRepository.isFollowing(targetUserId, currentUserId)
