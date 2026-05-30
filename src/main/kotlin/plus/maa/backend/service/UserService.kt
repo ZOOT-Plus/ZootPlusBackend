@@ -1,4 +1,4 @@
-package plus.maa.backend.service
+﻿package plus.maa.backend.service
 
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.ktorm.database.Database
@@ -12,8 +12,10 @@ import org.ktorm.entity.sortedBy
 import org.ktorm.entity.take
 import org.ktorm.entity.toList
 import org.springframework.dao.DuplicateKeyException
+import org.springframework.http.HttpStatus
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Service
+import org.springframework.web.server.ResponseStatusException
 import plus.maa.backend.common.MaaStatusCode
 import plus.maa.backend.common.extensions.toMaaUser
 import plus.maa.backend.controller.request.user.LoginDTO
@@ -24,6 +26,7 @@ import plus.maa.backend.controller.request.user.UserInfoUpdateDTO
 import plus.maa.backend.controller.response.MaaResultException
 import plus.maa.backend.controller.response.user.MaaLoginRsp
 import plus.maa.backend.controller.response.user.MaaUserInfo
+import plus.maa.backend.controller.response.user.RelationType
 import plus.maa.backend.repository.entity.MaaUser
 import plus.maa.backend.repository.entity.UserEntity
 import plus.maa.backend.repository.entity.users
@@ -118,6 +121,7 @@ class UserService(
     fun register(registerDTO: RegisterDTO): MaaUserInfo {
         val userName = registerDTO.userName.trim()
         check(userName.length >= 4) { "用户名长度应在4-24位之间" }
+        check(userName.length <= 24) { "用户名长度应在4-24位之间" }
         check(!userKtormRepository.existsByUserName(userName)) {
             "用户名已存在，请重新取个名字吧"
         }
@@ -127,7 +131,7 @@ class UserService(
 
         val encoded = passwordEncoder.encode(registerDTO.password)!!
 
-        val user = MaaUser(
+        val maaUser = MaaUser(
             userName = userName,
             email = registerDTO.email,
             password = encoded,
@@ -135,9 +139,9 @@ class UserService(
             pwdUpdateTime = Instant.now(),
         )
         return try {
-            val userEntity = userKtormRepository.createFromMaaUser(user)
-            userKtormRepository.save(userEntity)
-            MaaUserInfo(userEntity).also {
+            val entity = userKtormRepository.createFromMaaUser(maaUser)
+            userKtormRepository.save(entity)
+            MaaUserInfo(entity).also {
                 Cache.invalidateMaaUserById(it.id)
             }
         } catch (_: DuplicateKeyException) {
@@ -154,11 +158,12 @@ class UserService(
     fun updateUserInfo(userId: Long, updateDTO: UserInfoUpdateDTO) {
         val userEntity = userKtormRepository.findById(userId) ?: return
         val newName = updateDTO.userName.trim()
-        check(newName.length >= 4) { "用户名长度应在4-24位之间" }
         if (newName == userEntity.userName) {
             // 暂时只支持修改用户名，如果有其他字段修改需要同步修改该逻辑
             return
         }
+        check(newName.length >= 4) { "用户名长度应在4-24位之间" }
+        check(newName.length <= 24) { "用户名长度应在4-24位之间" }
         // 用户名需要trim
         check(!userKtormRepository.existsByUserName(newName)) {
             "用户名已存在，请重新取个名字吧"
@@ -275,6 +280,70 @@ class UserService(
             .drop(offset)
             .take(limit)
             .toList()
+    }
+
+    /**
+     * 获取当前登录用户信息
+     */
+    fun getMe(userId: Long): MaaUserInfo {
+        val userEntity = userKtormRepository.findById(userId)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        return MaaUserInfo(userEntity)
+    }
+
+    /**
+     * 获取用户信息并附带与当前用户的关系
+     */
+    fun getWithRelation(targetId: Long, currentUserId: Long?): MaaUserInfo {
+        val userEntity = userKtormRepository.findById(targetId)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        val base = MaaUserInfo(userEntity)
+        if (currentUserId == null) return base
+        val relation = resolveRelation(currentUserId, targetId)
+        return base.copy(relation = relation)
+    }
+
+    /**
+     * 批量获取用户信息（可选附带关系）
+     */
+    fun getBatchUserInfos(ids: List<Long>, currentUserId: Long?): List<MaaUserInfo> {
+        if (ids.isEmpty()) return emptyList()
+        val users = userKtormRepository.findAllById(ids)
+        if (currentUserId == null) {
+            return users.map { MaaUserInfo(it) }
+        }
+        // 当前用户关注了哪些目标
+        val iFollowIds = userKtormRepository.getFollowedTargetIds(currentUserId, ids)
+        // 哪些目标关注了当前用户
+        val theyFollowMeIds = userKtormRepository.getFollowerTargetIds(ids, currentUserId)
+        return users.map { user ->
+            val uid = user.userId
+            val iFollow = uid in iFollowIds
+            val theyFollow = uid in theyFollowMeIds
+            val relation = when {
+                uid == currentUserId -> RelationType.SELF
+                iFollow && theyFollow -> RelationType.MUTUAL
+                iFollow -> RelationType.FOLLOWING
+                theyFollow -> RelationType.FOLLOWED_BY
+                else -> RelationType.NONE
+            }
+            MaaUserInfo(user).copy(relation = relation)
+        }
+    }
+
+    /**
+     * 解析当前用户与目标用户的关系
+     */
+    fun resolveRelation(currentUserId: Long, targetUserId: Long): RelationType {
+        if (currentUserId == targetUserId) return RelationType.SELF
+        val iFollow = userKtormRepository.isFollowing(currentUserId, targetUserId)
+        val theyFollow = userKtormRepository.isFollowing(targetUserId, currentUserId)
+        return when {
+            iFollow && theyFollow -> RelationType.MUTUAL
+            iFollow -> RelationType.FOLLOWING
+            theyFollow -> RelationType.FOLLOWED_BY
+            else -> RelationType.NONE
+        }
     }
 
     @Suppress("unused")

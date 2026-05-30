@@ -1,8 +1,10 @@
-package plus.maa.backend.controller.response.user
+﻿package plus.maa.backend.controller.response.user
 
+import kotlinx.serialization.Contextual
 import kotlinx.serialization.Serializable
 import plus.maa.backend.repository.entity.MaaUser
 import plus.maa.backend.repository.entity.UserEntity
+import java.time.Instant
 
 /**
  * 用户可对外公开的信息
@@ -16,6 +18,8 @@ data class MaaUserInfo(
     val activated: Boolean = false,
     val followingCount: Int = 0,
     val fansCount: Int = 0,
+    val relation: RelationType? = null,
+    @Contextual val followedAt: Instant? = null,
 ) {
     constructor(user: MaaUser) : this(
         id = user.userId!!,
