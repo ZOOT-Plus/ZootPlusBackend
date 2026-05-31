@@ -138,34 +138,6 @@ fun TaskContainer.registerOpenApiGen(
     configFile.set(file(configFilePath))
 }
 
-// The typescript-fetch generator sometimes produces model .ts files but
-// omits them from the barrel models/index.ts.  This task regenerates the
-// barrel so every model file is exported.
-val fixTsBarrelExport by tasks.registering {
-    group = "swagger"
-    description = "Regenerate models/index.ts to export every model file"
-    dependsOn("generateSwaggerCodeTsFetch")
-
-    doLast {
-        val modelsDir = clientDir.get().dir("ts-fetch-client/src/models").asFile
-        val exports = modelsDir.listFiles()
-            ?.filter { it.extension == "ts" && it.nameWithoutExtension != "index" }
-            ?.sortedBy { it.nameWithoutExtension }
-            ?.joinToString("\n") { "export * from './${it.nameWithoutExtension}';" }
-            ?: return@doLast
-
-        val indexFile = modelsDir.toPath().resolve("index.ts").toFile()
-        val newContent = """/* tslint:disable */
-/* eslint-disable */
-$exports
-"""
-        if (indexFile.readText() != newContent) {
-            indexFile.writeText(newContent)
-            println("  Regenerated models/index.ts with ${exports.lines().count()} exports")
-        }
-    }
-}
-
 tasks {
     registerOpenApiGen("TsFetch", "typescript-fetch", "client-config/ts-fetch.json", "ts-fetch-client")
     registerOpenApiGen("CSharp", "csharp", "client-config/csharp-netcore.json", "csharp-client")
@@ -176,7 +148,7 @@ tasks {
         group = "swagger"
         description = "Generate all client code from OpenAPI spec"
         dependsOn(
-            fixTsBarrelExport,
+            "generateSwaggerCodeTsFetch",
             "generateSwaggerCodeCSharp",
             "generateSwaggerCodeCpp",
             "generateSwaggerCodeRust",

@@ -1,4 +1,5 @@
 name: Openapi and Clients
+
 on:
   release:
   push:
@@ -6,6 +7,7 @@ on:
       - main
       - dev
   workflow_dispatch:
+
 jobs:
   generate-openapi-and-clients:
     runs-on: ubuntu-latest
@@ -15,11 +17,11 @@ jobs:
 
     services:
       valkey:
-        image: valkey/valkey
+        image: valkey/valkey:9-alpine
         ports:
           - 6379:6379
       postgres:
-        image: postgres
+        image: postgres:18-alpine
         env:
           POSTGRES_USER: root
           POSTGRES_PASSWORD: admin
@@ -29,10 +31,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
-          ref: ${{ github.head_ref }}   # checkout the correct branch name
-          fetch-depth: 0                # fetch the whole repo history
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
 
       - name: Git Version
         id: version
@@ -43,14 +45,17 @@ jobs:
           major-identifier: "breaking:"
           minor-identifier: "/^(feat|refactor):/"
 
-      - uses: actions/setup-java@v4
+      - name: Setup Java
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 25
 
-      - name: Remove aliyun maven mirror
-        run: |
-          sed -i '/maven(url/d' build.gradle.kts
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Remove Aliyun Maven mirror
+        run: sed -i '/maven(url/d' build.gradle.kts
 
       - name: Set versions
         run: |
@@ -63,56 +68,51 @@ jobs:
       - name: Generate dev profile
         run: cp ./src/main/resources/application-template.yml ./src/main/resources/application-dev.yml
 
-      - run: chmod 777 ./gradlew
-
-      - name: Execute Gradle generateOpenApi
+      - name: Generate OpenAPI spec and all clients
         env:
           MAA_COPILOT_SEGMENT_ENABLED: false
-        run: ./gradlew generateOpenApi
-
-      - name: Generate Clients
         run: ./gradlew generateSwaggerCode
 
-      - name: upload openapi
-        uses: actions/upload-artifact@v4
+      - name: Upload OpenAPI spec
+        uses: actions/upload-artifact@v7
         with:
           name: openapi-${{ steps.version.outputs.version }}
-          path: ./build/docs/swagger.json
+          path: build/docs/swagger.json
 
-      - name: upload cpp client
-        uses: actions/upload-artifact@v4
+      - name: Upload C++ client
+        uses: actions/upload-artifact@v7
         with:
           name: cpp-client
-          path: ./build/clients/cpp-client/*
+          path: build/clients/cpp-client/
 
-      - name: upload csharp client
-        uses: actions/upload-artifact@v4
+      - name: Upload C# client
+        uses: actions/upload-artifact@v7
         with:
           name: csharp-client
-          path: ./build/clients/csharp-client/*
+          path: build/clients/csharp-client/
 
-      - name: upload rust client
-        uses: actions/upload-artifact@v4
+      - name: Upload Rust client
+        uses: actions/upload-artifact@v7
         with:
           name: rust-client
-          path: ./build/clients/rust-client/*
+          path: build/clients/rust-client/
 
-      - name: upload ts client
-        uses: actions/upload-artifact@v4
+      - name: Upload TS client
+        uses: actions/upload-artifact@v7
         with:
           name: ts-client
-          path: ./build/clients/ts-fetch-client/*
+          path: build/clients/ts-fetch-client/
 
       - name: Checkout zoot-plus-client-ts
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ZOOT-Plus/zoot-plus-client-ts
           path: zoot-plus-client-ts
           token: ${{ secrets.TS_CLIENT_PAT }}
 
-      - name: Update zoot-plus-client-ts and push to remote
+      - name: Publish TS client
         run: |
-          cp -rf build/clients/ts-fetch-client/* zoot-plus-client-ts/
+          rsync -a --delete build/clients/ts-fetch-client/ zoot-plus-client-ts/
           cd zoot-plus-client-ts
 
           git diff --quiet && exit 0
@@ -120,8 +120,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .
-          git commit -m "release: ${{ steps.version.outputs.version }}"\
-                     -m "Generated from https://github.com/ZOOT-Plus/ZootPlusBackend/actions/runs/${{ github.run_id }}"
-          git tag ${{ steps.version.outputs.version }}
+          git commit -m "release: ${{ steps.version.outputs.version }}" \
+                     -m "Generated from ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          git tag "${{ steps.version.outputs.version }}"
           git push
           git push --tags
