@@ -112,7 +112,10 @@ jobs:
 
       - name: Publish TS client
         run: |
-          rsync -a --delete build/clients/ts-fetch-client/ zoot-plus-client-ts/
+          set -e
+          # Remove stale files from previous builds (keep .git)
+          find zoot-plus-client-ts -mindepth 1 -maxdepth 1 -not -name '.git' -exec rm -rf {} +
+          cp -rf build/clients/ts-fetch-client/* zoot-plus-client-ts/
           cd zoot-plus-client-ts
 
           git diff --quiet && exit 0
