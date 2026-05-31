@@ -1,4 +1,3 @@
-import org.hidetake.gradle.swagger.generator.GenerateSwaggerCode
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jlleitschuh.gradle.ktlint.reporter.ReporterType
 
@@ -7,7 +6,6 @@ plugins {
     id("org.springframework.boot") version "4.0.6"
     id("io.spring.dependency-management") version "1.1.7"
     id("org.springdoc.openapi-gradle-plugin") version "1.9.0"
-    id("org.hidetake.swagger.generator") version "2.19.2"
     id("com.gorylenko.gradle-git-properties") version "3.0.2"
     id("io.freefair.aspectj.post-compile-weaving") version "9.5.0"
 
@@ -104,9 +102,13 @@ dependencies {
     implementation("com.github.ben-manes.caffeine:caffeine:3.2.2")
     implementation("com.networknt:json-schema-validator:1.5.8")
 
-    swaggerCodegen("org.openapitools:openapi-generator-cli:7.22.0")
-
     implementation("com.belerweb:pinyin4j:2.5.0")
+}
+
+val openApiGeneratorConfig = configurations.create("openApiGenerator")
+
+dependencies {
+    add("openApiGenerator", "org.openapitools:openapi-generator-cli:7.22.0")
 }
 
 val swaggerOutputDir = layout.buildDirectory.dir("docs")
@@ -119,51 +121,50 @@ openApi {
     waitTimeInSeconds = 30
 }
 
-swaggerSources {
-    val clientDir = layout.buildDirectory.dir("clients").get()
-    val swaggerOutputFile = swaggerOutputDir.get().file(swaggerOutputName).asFile
-    create("TsFetch") {
-        setInputFile(swaggerOutputFile)
-        code(
-            closureOf<GenerateSwaggerCode> {
-                language = "typescript-fetch"
-                configFile = file("client-config/ts-fetch.json")
-//            templateDir = file('client-config/typescript-fetch')
-                rawOptions = listOf("-e", "mustache")
-                outputDir = file(clientDir.dir("ts-fetch-client"))
-            },
-        )
-    }
-    create("CSharp") {
-        setInputFile(swaggerOutputFile)
-        code(
-            closureOf<GenerateSwaggerCode> {
-                language = "csharp"
-                configFile = file("client-config/csharp-netcore.json")
-                outputDir = file(clientDir.dir("csharp-client"))
-//            rawOptions = listOf("--type-mappings", "binary=System.IO.Stream")
-            },
-        )
-    }
-    create("Cpp") {
-        setInputFile(swaggerOutputFile)
-        code(
-            closureOf<GenerateSwaggerCode> {
-                language = "cpp-restsdk"
-                configFile = file("client-config/cpp.json")
-                outputDir = file(clientDir.dir("cpp-client"))
-            },
-        )
-    }
-    create("Rust") {
-        setInputFile(swaggerOutputFile)
-        code(
-            closureOf<GenerateSwaggerCode> {
-                language = "rust"
-                configFile = file("client-config/rust.json")
-                outputDir = file(clientDir.dir("rust-client"))
-            },
-        )
+val swaggerInputFile = swaggerOutputDir.get().file(swaggerOutputName)
+val clientDir = layout.buildDirectory.dir("clients")
+
+// Helper to create a code generation task
+fun TaskContainer.registerOpenApiGen(
+    name: String,
+    language: String,
+    configFile: String,
+    outputSubDir: String,
+    extraArgs: List<String> = emptyList(),
+) = register<JavaExec>("generateSwaggerCode$name") {
+    group = "swagger"
+    description = "Generate $name client code from OpenAPI spec"
+    classpath = openApiGeneratorConfig
+    mainClass = "org.openapitools.codegen.OpenAPIGenerator"
+
+    dependsOn("generateOpenApiDocs")
+
+    inputs.file(swaggerInputFile)
+    inputs.file(configFile)
+    outputs.dir(clientDir.map { it.dir(outputSubDir) })
+
+    val outputDirFile = clientDir.map { it.dir(outputSubDir) }.get().asFile
+    args(
+        "generate",
+        "-i", swaggerInputFile.asFile.absolutePath,
+        "-g", language,
+        "-o", outputDirFile.absolutePath,
+        "-c", file(configFile).absolutePath,
+        *extraArgs.toTypedArray(),
+    )
+}
+
+tasks {
+    registerOpenApiGen("TsFetch", "typescript-fetch", "client-config/ts-fetch.json", "ts-fetch-client")
+    registerOpenApiGen("CSharp", "csharp", "client-config/csharp-netcore.json", "csharp-client")
+    registerOpenApiGen("Cpp", "cpp-restsdk", "client-config/cpp.json", "cpp-client")
+    registerOpenApiGen("Rust", "rust", "client-config/rust.json", "rust-client")
+
+    // Top-level aggregate task
+    register("generateSwaggerCode") {
+        group = "swagger"
+        description = "Generate all client code from OpenAPI spec"
+        dependsOn("generateSwaggerCodeTsFetch", "generateSwaggerCodeCSharp", "generateSwaggerCodeCpp", "generateSwaggerCodeRust")
     }
 }
 
