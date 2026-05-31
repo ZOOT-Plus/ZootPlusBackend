@@ -6,6 +6,7 @@ import io.swagger.v3.oas.models.OpenAPI
 import io.swagger.v3.oas.models.info.Info
 import io.swagger.v3.oas.models.info.License
 import io.swagger.v3.oas.models.security.SecurityScheme
+import org.springdoc.core.customizers.OpenApiCustomizer
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import plus.maa.backend.config.external.MaaCopilotProperties
@@ -67,6 +68,23 @@ class SpringDocConfig(
                 )
             },
         )
+    }
+
+    /**
+     * Drop the [data] property from the bare [MaaResult] schema.
+     *
+     * Kotlin's [MaaResult<Nothing>] (used for error responses) causes SpringDoc
+     * to emit `"type": "null"` for [data].  The typescript-fetch generator does
+     * not support the Null data type and would otherwise produce broken imports
+     * for a non-existent `Null` model.
+     *
+     * Only the bare MaaResult (used by GET /) is affected; typed variants like
+     * MaaResultCopilotInfo have their own schemas and are left untouched.
+     */
+    @Bean
+    fun removeMaaResultNullData(): OpenApiCustomizer = OpenApiCustomizer { api ->
+        val schemas = api.components?.schemas ?: return@OpenApiCustomizer
+        schemas["MaaResult"]?.properties?.remove("data")
     }
 
     companion object {
