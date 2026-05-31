@@ -9,6 +9,7 @@ import org.ktorm.dsl.inList
 import org.ktorm.dsl.insert
 import org.ktorm.dsl.limit
 import org.ktorm.dsl.map
+import org.ktorm.dsl.mapNotNull
 import org.ktorm.dsl.minus
 import org.ktorm.dsl.plus
 import org.ktorm.dsl.select
@@ -162,6 +163,62 @@ class UserKtormRepository(
                 database.from(UserFollows).select(UserFollows.userId)
                     .where { UserFollows.followUserId eq userId }
         }
+    }
+
+    /**
+     * 查询 userId 关注了 targetIds 中的哪些用户，返回 followUserId -> updatedAt 的映射
+     */
+    fun getFollowUpdatedAtMap(userId: Long, targetIds: List<Long>): Map<Long, LocalDateTime> {
+        if (targetIds.isEmpty()) return emptyMap()
+        return database.from(UserFollows)
+            .select(UserFollows.followUserId, UserFollows.updatedAt)
+            .where { (UserFollows.userId eq userId) and (UserFollows.followUserId inList targetIds) }
+            .map { row -> row[UserFollows.followUserId]!! to row[UserFollows.updatedAt]!! }
+            .toMap()
+    }
+
+    /**
+     * 查询 fanIds 中谁关注了 userId，返回 fanId -> updatedAt 的映射
+     */
+    fun getFansUpdatedAtMap(fanIds: List<Long>, userId: Long): Map<Long, LocalDateTime> {
+        if (fanIds.isEmpty()) return emptyMap()
+        return database.from(UserFollows)
+            .select(UserFollows.userId, UserFollows.updatedAt)
+            .where { (UserFollows.userId inList fanIds) and (UserFollows.followUserId eq userId) }
+            .map { row -> row[UserFollows.userId]!! to row[UserFollows.updatedAt]!! }
+            .toMap()
+    }
+
+    /**
+     * 查询 userId 关注了 targetIds 中的哪些用户，返回被关注的 targetIds 子集
+     */
+    fun getFollowedTargetIds(userId: Long, targetIds: List<Long>): Set<Long> {
+        if (targetIds.isEmpty()) return emptySet()
+        return database.from(UserFollows)
+            .select(UserFollows.followUserId)
+            .where { (UserFollows.userId eq userId) and (UserFollows.followUserId inList targetIds) }
+            .mapNotNull { it[UserFollows.followUserId] }
+            .toSet()
+    }
+
+    /**
+     * 查询 targetIds 中哪些用户关注了 userId，返回关注了 userId 的 targetIds 子集
+     */
+    fun getFollowerTargetIds(targetIds: List<Long>, userId: Long): Set<Long> {
+        if (targetIds.isEmpty()) return emptySet()
+        return database.from(UserFollows)
+            .select(UserFollows.userId)
+            .where { (UserFollows.userId inList targetIds) and (UserFollows.followUserId eq userId) }
+            .mapNotNull { it[UserFollows.userId] }
+            .toSet()
+    }
+
+    fun isFollowing(userId: Long, followUserId: Long): Boolean {
+        return database.from(UserFollows).select(UserFollows.userId)
+            .where { (UserFollows.userId eq userId) and (UserFollows.followUserId eq followUserId) }
+            .limit(1)
+            .map { it[UserFollows.userId] }
+            .isNotEmpty()
     }
 
     override fun save(entity: UserEntity): UserEntity {
