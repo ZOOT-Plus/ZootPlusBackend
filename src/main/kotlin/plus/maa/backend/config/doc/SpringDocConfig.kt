@@ -1,10 +1,12 @@
 package plus.maa.backend.config.doc
 
+import cn.hutool.core.text.NamingCase
 import io.swagger.v3.oas.models.Components
 import io.swagger.v3.oas.models.ExternalDocumentation
 import io.swagger.v3.oas.models.OpenAPI
 import io.swagger.v3.oas.models.info.Info
 import io.swagger.v3.oas.models.info.License
+import io.swagger.v3.oas.models.media.Schema
 import io.swagger.v3.oas.models.security.SecurityScheme
 import org.springdoc.core.customizers.OpenApiCustomizer
 import org.springframework.context.annotation.Bean
@@ -87,8 +89,50 @@ class SpringDocConfig(
         schemas["MaaResult"]?.properties?.remove("data")
     }
 
+    /**
+     * Convert all schema property names from camelCase to snake_case so that
+     * the generated OpenAPI spec matches the runtime JSON naming strategy.
+     *
+     * SpringDoc introspects Kotlin classes via Jackson (Swagger-core), which
+     * defaults to camelCase. But the runtime uses kotlinx-serialization with
+     * JsonNamingStrategy.SnakeCase, so the actual API returns snake_case JSON.
+     *
+     * This customizer applies the same camelCase-to-snake_case conversion that
+     * kotlinx-serialization uses internally, so the OpenAPI spec -- and the
+     * client code generated from it -- matches what the API actually serves.
+     */
+    @Bean
+    fun enforceSnakeCasePropertyNaming(): OpenApiCustomizer = OpenApiCustomizer { api ->
+        val schemas = api.components?.schemas ?: return@OpenApiCustomizer
+        schemas.forEach { (_, schema) ->
+            renamePropertiesToSnakeCase(schema)
+        }
+    }
+
     companion object {
         const val SECURITY_SCHEME_JWT: String = "Jwt"
         const val SECURITY_SCHEME_API_KEY: String = "API_Key"
+
+        /**
+         * Recursively rename properties of a schema and its nested schemas
+         * from camelCase to snake_case.
+         */
+        private fun renamePropertiesToSnakeCase(schema: Schema<*>) {
+            schema.properties?.let { props ->
+                val renamed = LinkedHashMap<String, Schema<*>>()
+                props.forEach { (name, propSchema) ->
+                    renamed[NamingCase.toUnderlineCase(name)] = propSchema
+                    renamePropertiesToSnakeCase(propSchema)
+                }
+                schema.properties = renamed
+            }
+
+            schema.items?.let { renamePropertiesToSnakeCase(it) }
+
+            schema.oneOf?.forEach { renamePropertiesToSnakeCase(it) }
+            schema.anyOf?.forEach { renamePropertiesToSnakeCase(it) }
+            schema.allOf?.forEach { renamePropertiesToSnakeCase(it) }
+        }
+
     }
 }
