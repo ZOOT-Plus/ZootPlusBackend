@@ -41,10 +41,12 @@ kapt {
 }
 
 repositories {
-    maven(url = "https://maven.aliyun.com/repository/public")
-    maven(url = "https://maven.aliyun.com/repository/spring")
-    maven(url = "https://maven.aliyun.com/repository/spring-plugin")
-    maven(url = "https://maven.aliyun.com/repository/gradle-plugin")
+    if (System.getenv("CI") != "true") {
+        maven(url = "https://maven.aliyun.com/repository/public")
+        maven(url = "https://maven.aliyun.com/repository/spring")
+        maven(url = "https://maven.aliyun.com/repository/spring-plugin")
+        maven(url = "https://maven.aliyun.com/repository/gradle-plugin")
+    }
     mavenCentral()
 }
 

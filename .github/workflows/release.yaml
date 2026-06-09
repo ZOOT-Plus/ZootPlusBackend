@@ -47,9 +47,8 @@ jobs:
           distribution: temurin
           java-version: 25
 
-      - name: Remove aliyun maven mirror
-        run: |
-          sed -i '/maven(url/d' build.gradle.kts
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
 
       - name: Set Java version
         run: |
