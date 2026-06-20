@@ -127,6 +127,11 @@ class SpringDocConfig(
                 schema.properties = renamed
             }
 
+            // required array must use the same renamed keys as properties
+            schema.required?.let { required ->
+                schema.required = required.map { NamingCase.toUnderlineCase(it) }
+            }
+
             schema.items?.let { renamePropertiesToSnakeCase(it) }
 
             schema.oneOf?.forEach { renamePropertiesToSnakeCase(it) }

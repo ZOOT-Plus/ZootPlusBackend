@@ -70,6 +70,8 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-cache")
 
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-scalar:3.0.3")
+    // swagger-core uses Jackson 2.x; without its kotlin-module, all Kotlin properties default to nullable
+    implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.21.2")
     implementation("com.github.therapi:therapi-runtime-javadoc:0.15.0")
     kapt("com.github.therapi:therapi-runtime-javadoc-scribe:0.15.0")
 
