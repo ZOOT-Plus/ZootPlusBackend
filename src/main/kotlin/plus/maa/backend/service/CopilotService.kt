@@ -88,6 +88,7 @@ class CopilotService(
     private val properties: MaaCopilotProperties,
     private val sensitiveWordService: SensitiveWordService,
     private val segmentService: SegmentService,
+    private val siteMessageService: SiteMessageService,
 ) {
     private val log = KotlinLogging.logger { }
 
@@ -161,6 +162,13 @@ class CopilotService(
             }
         }
         segmentService.updateIndex(copilotId, entity.title, entity.details)
+        if (request.status == CopilotSetStatus.PUBLIC) {
+            try {
+                siteMessageService.notifyCopilotPublished(loginUserId, copilotId, entity.title)
+            } catch (e: Exception) {
+                log.error(e) { "创建作业发布站内信失败, copilotId: $copilotId" }
+            }
+        }
         return copilotId
     }
 

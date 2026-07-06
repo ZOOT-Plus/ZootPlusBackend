@@ -16,6 +16,7 @@ import plus.maa.backend.config.doc.RequireJwt
 import plus.maa.backend.config.security.AuthenticationHelper
 import plus.maa.backend.controller.response.MaaResult
 import plus.maa.backend.controller.response.MaaResult.Companion.success
+import plus.maa.backend.controller.response.user.FollowStatusInfo
 import plus.maa.backend.controller.response.user.MaaUserInfo
 import plus.maa.backend.service.follow.UserFollowService
 
@@ -42,6 +43,21 @@ class UserFollowController(
     fun unfollow(@PathVariable followUserId: Long): MaaResult<Unit> = success(
         userFollowService.unfollow(helper.userId, followUserId),
     )
+
+    @Operation(summary = "设置特别关注")
+    @ApiResponse(description = "设置特别关注结果")
+    @RequireJwt
+    @PostMapping("/special/{followUserId}")
+    fun specialFollow(@PathVariable followUserId: Long, @RequestParam status: Boolean): MaaResult<Unit> = success(
+        userFollowService.setSpecialFollow(helper.userId, followUserId, status),
+    )
+
+    @Operation(summary = "查询关注状态")
+    @ApiResponse(description = "关注状态")
+    @RequireJwt
+    @GetMapping("/status/{followUserId}")
+    fun getStatus(@PathVariable followUserId: Long): MaaResult<FollowStatusInfo> =
+        success(userFollowService.getStatus(helper.userId, followUserId))
 
     @Operation(summary = "获取关注列表")
     @ApiResponse(description = "关注列表")
