@@ -109,6 +109,26 @@ class SpringDocConfig(
         }
     }
 
+    /**
+     * swagger-core emits the CopilotCUDRequest discriminator's `propertyName` (`type`)
+     * but not its `mapping`. Without the mapping, openapi-generator expects the
+     * discriminator value to equal the subtype schema name (PrtsCUDRequest /
+     * VideoCUDRequest), which contradicts the runtime JSON that sends PRTS / VIDEO
+     * (kotlinx SerialName / Jackson JsonSubTypes.Type name). Patch in the mapping
+     * so generated clients discriminate on the values the API actually serves.
+     */
+    @Bean
+    fun addCopilotCudDiscriminatorMapping(): OpenApiCustomizer = OpenApiCustomizer { api ->
+        val base = api.components?.schemas?.get("CopilotCUDRequest") ?: return@OpenApiCustomizer
+        val disc = base.discriminator ?: return@OpenApiCustomizer
+        if (disc.mapping.isNullOrEmpty()) {
+            disc.mapping = linkedMapOf(
+                "PRTS" to "#/components/schemas/PrtsCUDRequest",
+                "VIDEO" to "#/components/schemas/VideoCUDRequest",
+            )
+        }
+    }
+
     companion object {
         const val SECURITY_SCHEME_JWT: String = "Jwt"
         const val SECURITY_SCHEME_API_KEY: String = "API_Key"

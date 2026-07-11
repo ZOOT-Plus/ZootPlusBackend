@@ -14,11 +14,15 @@ import org.ktorm.schema.text
 import org.ktorm.schema.varchar
 import plus.maa.backend.service.model.CommentStatus
 import plus.maa.backend.service.model.CopilotSetStatus
+import plus.maa.backend.service.model.CopilotType
 import java.time.LocalDateTime
 
 interface CopilotEntity : Entity<CopilotEntity> {
     // 自增数字ID
     var copilotId: Long
+
+    // 作业类型
+    var type: CopilotType
 
     // 关卡名
     var stageName: String
@@ -73,6 +77,7 @@ interface CopilotEntity : Entity<CopilotEntity> {
 
 object Copilots : Table<CopilotEntity>("copilot") {
     val copilotId = long("copilot_id").primaryKey().bindTo { it.copilotId }
+    val type = enum<CopilotType>("type").bindTo { it.type }
     val stageName = varchar("stage_name").bindTo { it.stageName }
     val uploaderId = long("uploader_id").bindTo { it.uploaderId }
     val views = long("views").bindTo { it.views }

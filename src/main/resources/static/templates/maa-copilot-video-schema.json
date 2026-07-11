@@ -1,0 +1,161 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema",
+  "title": "Arknights Video Operation",
+  "description": "Video job content schema. Provides operator/group lists and a video link for a level, no automation actions.",
+  "properties": {
+    "stage_name": {
+      "$ref": "#/definitions/stage_name"
+    },
+    "doc": {
+      "$ref": "#/definitions/doc"
+    },
+    "opers": {
+      "type": "array",
+      "description": "Operator list.",
+      "items": {
+        "$ref": "#/definitions/operator"
+      }
+    },
+    "groups": {
+      "type": "array",
+      "description": "Group list.",
+      "items": {
+        "$ref": "#/definitions/group"
+      }
+    },
+    "video_url": {
+      "$ref": "#/definitions/video_url"
+    }
+  },
+  "required": [
+    "stage_name",
+    "doc",
+    "video_url"
+  ],
+  "definitions": {
+    "stage_name": {
+      "type": "string",
+      "description": "Arknights level id like obt/main/level_main_00-01"
+    },
+    "doc": {
+      "type": "object",
+      "description": "The title and detail description for this operation",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Operation title",
+          "minLength": 1
+        },
+        "details": {
+          "type": "string",
+          "description": "Operation description"
+        },
+        "title_color": {
+          "type": "string",
+          "description": "The color of title text displayed in Maa"
+        },
+        "details_color": {
+          "type": "string",
+          "description": "The color of details text displayed in Maa"
+        }
+      },
+      "required": [
+        "title",
+        "details"
+      ]
+    },
+    "operator": {
+      "type": "object",
+      "title": "Operator definition",
+      "description": "Arknights operator info",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The official full name of the operator in your language.",
+          "minLength": 1
+        },
+        "skill": {
+          "type": "integer",
+          "description": "The skill of the operator to use in the operation.",
+          "minimum": 1,
+          "maximum": 3,
+          "default": 1
+        },
+        "skill_usage": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3,
+          "default": 0
+        },
+        "requirements": {
+          "$ref": "#/definitions/operator_requirements"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "operator_requirements": {
+      "type": "object",
+      "description": "Operator requirements, empty by default.",
+      "properties": {
+        "elite": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2,
+          "default": 0
+        },
+        "level": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 90,
+          "default": 0
+        },
+        "skill_level": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10,
+          "default": 0
+        },
+        "module": {
+          "type": "integer",
+          "default": -1
+        },
+        "potentiality": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 6,
+          "default": 0
+        }
+      }
+    },
+    "group": {
+      "type": "object",
+      "description": "Operator group",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "opers": {
+          "type": "array",
+          "description": "Operators to be chosen from.",
+          "items": {
+            "$ref": "#/definitions/operator"
+          }
+        }
+      },
+      "required": [
+        "name",
+        "opers"
+      ]
+    },
+    "video_url": {
+      "type": "string",
+      "description": "Video link for the operation. Must be http(s) and on an allowlisted host.",
+      "format": "uri",
+      "pattern": "^https?://",
+      "minLength": 8
+    }
+  }
+}

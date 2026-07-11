@@ -31,8 +31,10 @@ class JsonSchemaMatchValidator : ConstraintValidator<JsonSchemaMatch, String> {
 
     companion object {
         const val COPILOT_SCHEMA_JSON = "static/templates/maa-copilot-schema.json"
+        const val COPILOT_VIDEO_SCHEMA_JSON = "static/templates/maa-copilot-video-schema.json"
         val validators = mapOf(
             loadSchema(COPILOT_SCHEMA_JSON),
+            loadSchema(COPILOT_VIDEO_SCHEMA_JSON),
         )
 
         @Suppress("SameParameterValue")

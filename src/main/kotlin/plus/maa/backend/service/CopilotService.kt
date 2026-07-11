@@ -4,6 +4,7 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.ktorm.database.Database
 import org.ktorm.dsl.and
 import org.ktorm.dsl.asc
@@ -36,8 +37,12 @@ import plus.maa.backend.common.extensions.removeQuotes
 import plus.maa.backend.common.extensions.requireNotNull
 import plus.maa.backend.config.external.MaaCopilotProperties
 import plus.maa.backend.controller.request.copilot.CopilotCUDRequest
-import plus.maa.backend.controller.request.copilot.CopilotDTO
+import plus.maa.backend.controller.request.copilot.CopilotContentDTO
 import plus.maa.backend.controller.request.copilot.CopilotQueriesRequest
+import plus.maa.backend.controller.request.copilot.PrtsCUDRequest
+import plus.maa.backend.controller.request.copilot.PrtsDTO
+import plus.maa.backend.controller.request.copilot.VideoCUDRequest
+import plus.maa.backend.controller.request.copilot.VideoDTO
 import plus.maa.backend.controller.request.copilot.CopilotRatingReq
 import plus.maa.backend.controller.response.MaaResultException
 import plus.maa.backend.controller.response.copilot.CopilotInfo
@@ -57,6 +62,7 @@ import plus.maa.backend.repository.ktorm.CopilotKtormRepository
 import plus.maa.backend.service.level.ArkLevelService
 import plus.maa.backend.service.model.CommentStatus
 import plus.maa.backend.service.model.CopilotSetStatus
+import plus.maa.backend.service.model.CopilotType
 import plus.maa.backend.service.model.RatingType
 import plus.maa.backend.service.segment.SegmentService
 import plus.maa.backend.service.sensitiveword.SensitiveWordService
@@ -92,10 +98,14 @@ class CopilotService(
     private val log = KotlinLogging.logger { }
 
     /**
-     * 将字符串解析为 [CopilotDTO], 检验敏感词并修正前端的冗余部分
+     * 按请求类型解析作业内容，检验敏感词并修正前端的冗余部分。
+     * 作业类型由请求子类型决定，不由内容 JSON 内字段决定。
      */
-    private fun String.parseToCopilotDto() = try {
-        json.decodeFromString<CopilotDTO>(this)
+    private fun CopilotCUDRequest.parseContent(): CopilotContentDTO = try {
+        when (this) {
+            is PrtsCUDRequest -> json.decodeFromString<PrtsDTO>(content)
+            is VideoCUDRequest -> json.decodeFromString<VideoDTO>(content)
+        }
     } catch (e: Exception) {
         log.error(e) { "解析copilot失败" }
         throw MaaResultException("解析copilot失败")
@@ -110,9 +120,11 @@ class CopilotService(
         opers?.forEach { operator: Copilot.Operators ->
             operator.name = operator.name.removeQuotes()
         }
-        // actions name 不是必须
-        actions?.forEach { action: Copilot.Action ->
-            action.name = action.name?.removeQuotes()
+        // actions name 不是必须（仅 PRTS）
+        if (this is PrtsDTO) {
+            actions?.forEach { action: Copilot.Action ->
+                action.name = action.name?.removeQuotes()
+            }
         }
         // 使用 stageId 存储作业关卡信息
         levelService.findByLevelIdFuzzy(stageName)?.stageId?.let {
@@ -120,14 +132,27 @@ class CopilotService(
         }
     }
 
+    /** 请求类型对应的作业类型 */
+    private fun CopilotCUDRequest.copilotType(): CopilotType = when (this) {
+        is PrtsCUDRequest -> CopilotType.PRTS
+        is VideoCUDRequest -> CopilotType.VIDEO
+    }
+
+    /** 从原始内容 JSON 中提取 video_url（PRTS 为 null） */
+    private fun extractVideoUrl(content: String): String? =
+        runCatching {
+            json.parseToJsonElement(content).jsonObject["video_url"]?.jsonPrimitive?.content
+        }.getOrNull()
+
     /**
      * 上传新的作业
      */
     fun upload(loginUserId: Long, request: CopilotCUDRequest): Long {
-        val dto = request.content.parseToCopilotDto()
+        val dto = request.parseContent()
         val now = LocalDateTime.now()
 
         val entity = CopilotEntity {
+            this.type = request.copilotType()
             this.stageName = dto.stageName
             this.uploaderId = loginUserId
             this.views = 0L
@@ -149,10 +174,10 @@ class CopilotService(
         }
         copilotKtormRepository.insertEntity(entity)
         val copilotId = entity.copilotId
-
-        if (!dto.opers.isNullOrEmpty()) {
+        val opers = dto.opers
+        if (!opers.isNullOrEmpty()) {
             database.batchInsert(Operators) {
-                dto.opers.map { op ->
+                opers.map { op ->
                     item {
                         set(it.copilotId, copilotId)
                         set(it.name, op.name)
@@ -167,7 +192,7 @@ class CopilotService(
     /**
      * 根据作业id删除作业
      */
-    fun delete(loginUserId: Long, request: CopilotCUDRequest) = userEditCopilot(loginUserId, request.id) {
+    fun delete(loginUserId: Long, copilotIdToDelete: Long?) = userEditCopilot(loginUserId, copilotIdToDelete) {
         delete = true
         deleteTime = LocalDateTime.now()
     }.apply {
@@ -237,6 +262,7 @@ class CopilotService(
             request.uploaderId.isNullOrBlank() &&
             request.operator.isNullOrBlank() &&
             request.copilotIds.isNullOrEmpty() &&
+            request.type == null &&
             !request.onlyFollowing
         ) {
             request.orderBy?.blankAsNull()
@@ -333,6 +359,9 @@ class CopilotService(
             val conditions = ArrayList<ColumnDeclaring<Boolean>>()
             conditions += ArgumentExpression(true, BooleanSqlType)
             conditions += it.delete eq false
+            if (request.type != null) {
+                conditions += it.type eq request.type
+            }
             if (requestStatus != null) {
                 conditions += it.status eq requestStatus
             }
@@ -475,13 +504,19 @@ class CopilotService(
     }
 
     /**
-     * 增量更新
+     * 增量更新。作业类型不可更改，请求类型必须与已存储类型一致，否则 400。
      */
     fun update(loginUserId: Long, request: CopilotCUDRequest) {
         var cIdToDeleteCache: Long? = null
 
-        val dto = request.content.parseToCopilotDto()
+        val dto = request.parseContent()
+        val requestType = request.copilotType()
         userEditCopilot(loginUserId, request.id) {
+            // 作业类型不可更改
+            if (type != requestType) {
+                throw MaaResultException(400, "作业类型不可更改")
+            }
+
             segmentService.removeIndex(copilotId, title, details)
 
             // 从公开改为隐藏时，如果数据存在缓存中则需要清除缓存
@@ -499,9 +534,10 @@ class CopilotService(
             database.delete(Operators) {
                 it.copilotId eq copilotId
             }
-            if (!dto.opers.isNullOrEmpty()) {
+            val opers = dto.opers
+            if (!opers.isNullOrEmpty()) {
                 database.batchInsert(Operators) {
-                    dto.opers.map { op ->
+                    opers.map { op ->
                         item {
                             set(it.copilotId, copilotId)
                             set(it.name, op.name)
@@ -563,6 +599,8 @@ class CopilotService(
 
     private fun CopilotEntity.format(rating: RatingEntity?, userName: String, commentsCount: Long) = CopilotInfo(
         id = copilotId,
+        type = type,
+        videoUrl = if (type == CopilotType.VIDEO) extractVideoUrl(content) else null,
         uploadTime = uploadTime,
         uploaderId = uploaderId.toString(),
         uploader = userName,

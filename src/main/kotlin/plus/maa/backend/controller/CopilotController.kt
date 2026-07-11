@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.RestController
 import plus.maa.backend.config.doc.RequireJwt
 import plus.maa.backend.config.security.AuthenticationHelper
 import plus.maa.backend.controller.request.copilot.CopilotCUDRequest
+import plus.maa.backend.controller.request.copilot.CopilotDeleteRequest
 import plus.maa.backend.controller.request.copilot.CopilotQueriesRequest
 import plus.maa.backend.controller.request.copilot.CopilotRatingReq
 import plus.maa.backend.controller.response.MaaResult
@@ -53,8 +54,8 @@ class CopilotController(
     @ApiResponse(description = "删除作业结果")
     @RequireJwt
     @PostMapping("/delete")
-    fun deleteCopilot(@RequestBody request: CopilotCUDRequest): MaaResult<Unit> {
-        copilotService.delete(helper.userId, request)
+    fun deleteCopilot(@RequestBody request: CopilotDeleteRequest): MaaResult<Unit> {
+        copilotService.delete(helper.userId, request.id)
         return success()
     }
 

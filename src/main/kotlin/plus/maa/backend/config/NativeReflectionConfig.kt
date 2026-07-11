@@ -2,7 +2,12 @@ package plus.maa.backend.config
 
 import org.springframework.aot.hint.annotation.RegisterReflectionForBinding
 import org.springframework.context.annotation.Configuration
-import plus.maa.backend.controller.request.copilot.CopilotDTO
+import plus.maa.backend.controller.request.copilot.CopilotContentDTO
+import plus.maa.backend.controller.request.copilot.CopilotDeleteRequest
+import plus.maa.backend.controller.request.copilot.PrtsCUDRequest
+import plus.maa.backend.controller.request.copilot.PrtsDTO
+import plus.maa.backend.controller.request.copilot.VideoCUDRequest
+import plus.maa.backend.controller.request.copilot.VideoDTO
 import plus.maa.backend.repository.entity.gamedata.ArkActivity
 import plus.maa.backend.repository.entity.gamedata.ArkCharacter
 import plus.maa.backend.repository.entity.gamedata.ArkStage
@@ -27,6 +32,11 @@ import plus.maa.backend.repository.entity.gamedata.ArkZone
     Tile::class,
     ArkTower::class,
     ArkZone::class,
-    CopilotDTO::class,
+    CopilotContentDTO::class,
+    PrtsDTO::class,
+    VideoDTO::class,
+    PrtsCUDRequest::class,
+    VideoCUDRequest::class,
+    CopilotDeleteRequest::class,
 )
 class NativeReflectionConfig

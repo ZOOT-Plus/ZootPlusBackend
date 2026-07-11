@@ -26,6 +26,7 @@ create table if not exists "user_follow"
 create table if not exists copilot
 (
   copilot_id        bigserial primary key,
+  type              text             default 'PRTS' :: text not null,
   stage_name        text                                       not null,
   uploader_id       bigint                                     not null,
   views             bigint                                     not null,
@@ -46,6 +47,7 @@ create table if not exists copilot
   notification      boolean
 );
 comment on column copilot.copilot_id is '自增数字ID';
+comment on column copilot.type is '作业类型 PRTS/VIDEO [plus.maa.backend.service.model.CopilotType]';
 comment on column copilot.stage_name is '关卡名';
 comment on column copilot.uploader_id is '上传者id';
 comment on column copilot.views is '查看次数';
@@ -58,6 +60,7 @@ comment on column copilot.upload_time is '更新时间';
 comment on column copilot.content is '原始数据';
 comment on column copilot.delete is '作业状态，后端默认设置为公开以兼容历史逻辑[plus.maa.backend.service.model.CopilotSetStatus]';
 create index if not exists idx_copilot_stage_name on copilot (stage_name);
+create index if not exists idx_copilot_type on copilot (type);
 create index if not exists idx_copilot_view on copilot (views);
 create index if not exists idx_hot_score on copilot (hot_score);
 

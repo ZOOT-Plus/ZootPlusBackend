@@ -4,6 +4,7 @@ import jakarta.validation.constraints.Max
 import kotlinx.serialization.Serializable
 import org.springframework.web.bind.annotation.BindParam
 import plus.maa.backend.service.model.CopilotSetStatus
+import plus.maa.backend.service.model.CopilotType
 
 /**
  * @author LoMu
@@ -24,5 +25,6 @@ data class CopilotQueriesRequest(
     val language: String? = null,
     @field:BindParam("copilot_ids") var copilotIds: List<Long>? = null,
     val status: CopilotSetStatus? = null,
+    val type: CopilotType? = null,
     val onlyFollowing: Boolean = false,
 )

@@ -4,11 +4,16 @@ import kotlinx.serialization.Contextual
 import kotlinx.serialization.Serializable
 import plus.maa.backend.service.model.CommentStatus
 import plus.maa.backend.service.model.CopilotSetStatus
+import plus.maa.backend.service.model.CopilotType
 import java.time.LocalDateTime
 
 @Serializable
 data class CopilotInfo(
     val id: Long,
+    // 作业类型
+    val type: CopilotType,
+    // 视频链接，仅 VIDEO 类型有值，PRTS 为 null
+    val videoUrl: String? = null,
     @Contextual
     val uploadTime: LocalDateTime,
     val uploaderId: String,
