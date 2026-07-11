@@ -1,7 +1,7 @@
 {
-  "packageName": "MaaCopilotClient",
+  "packageName": "ZootPlusClient",
   "packageVersion": "1.0.0",
-  "apiPackage": "maa.copilot.client.api",
-  "modelPackage": "maa.copilot.client.model",
+  "apiPackage": "zoot.plus.client.api",
+  "modelPackage": "zoot.plus.client.model",
   "packageGuid": "498c2ea0ed094879b4ea28b74fc2de25"
 }

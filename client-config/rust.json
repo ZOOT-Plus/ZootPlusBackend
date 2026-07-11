@@ -1,5 +1,5 @@
 {
-  "packageName": "maa_copilot_client",
+  "packageName": "zoot_plus_client",
   "packageVersion": "1.0.0",
   "library": "reqwest",
   "supportMiddleware": true

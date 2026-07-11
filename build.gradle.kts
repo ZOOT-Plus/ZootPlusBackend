@@ -4,14 +4,14 @@ import org.openapitools.generator.gradle.plugin.tasks.GenerateTask
 
 plugins {
     java
-    id("org.springframework.boot") version "4.0.6"
+    id("org.springframework.boot") version "4.0.7"
     id("io.spring.dependency-management") version "1.1.7"
     id("org.springdoc.openapi-gradle-plugin") version "1.9.0"
-    id("org.openapi.generator") version "7.22.0"
+    id("org.openapi.generator") version "7.23.0"
     id("com.gorylenko.gradle-git-properties") version "3.0.2"
     id("io.freefair.aspectj.post-compile-weaving") version "9.5.0"
 
-    val ktVersion = "2.3.21"
+    val ktVersion = "2.4.0"
     kotlin("jvm") version ktVersion
     kotlin("plugin.spring") version ktVersion
     kotlin("plugin.serialization") version ktVersion
@@ -51,13 +51,13 @@ repositories {
 }
 
 dependencies {
-    val ktormVersion = "4.1.1"
-    val hutoolVersion = "5.8.43"
+    val ktormVersion = "4.2.1"
+    val hutoolVersion = "5.8.47"
     val mapstructVersion = "1.6.3"
 
     kapt("org.springframework.boot:spring-boot-configuration-processor")
 
-    testImplementation("io.mockk:mockk:1.14.4")
+    testImplementation("io.mockk:mockk:1.14.11")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
 
     implementation("org.aspectj:aspectjrt:1.9.25.1")
@@ -83,13 +83,13 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test")
 
     // kotlin-logging
-    implementation("io.github.oshai:kotlin-logging-jvm:8.0.03")
+    implementation("io.github.oshai:kotlin-logging-jvm:8.0.4")
 
     // ktorm connect with spring-jdbc
     implementation("org.springframework.boot:spring-boot-starter-jdbc")
     implementation("org.ktorm:ktorm-core:$ktormVersion")
     implementation("org.ktorm:ktorm-support-postgresql:$ktormVersion")
-    implementation("org.postgresql:postgresql:42.7.7")
+    implementation("org.postgresql:postgresql:42.7.13")
     // hutool 的邮箱工具类依赖
     implementation("com.sun.mail:javax.mail:1.6.2")
     implementation("cn.hutool:hutool-extra:$hutoolVersion")
@@ -102,13 +102,13 @@ dependencies {
 
     implementation("com.github.magese:ik-analyzer:8.5.0")
 
-    implementation("org.eclipse.jgit:org.eclipse.jgit:7.1.0.202411261347-r")
-    implementation("org.eclipse.jgit:org.eclipse.jgit.ssh.apache.agent:7.1.0.202411261347-r")
+    implementation("org.eclipse.jgit:org.eclipse.jgit:7.7.0.202606012155-r")
+    implementation("org.eclipse.jgit:org.eclipse.jgit.ssh.apache.agent:7.7.0.202606012155-r")
     implementation("org.freemarker:freemarker:2.3.34")
-    implementation("com.github.ben-manes.caffeine:caffeine:3.2.2")
+    implementation("com.github.ben-manes.caffeine:caffeine:3.2.4")
     implementation("com.networknt:json-schema-validator:1.5.8")
 
-    implementation("com.belerweb:pinyin4j:2.5.0")
+    implementation("com.belerweb:pinyin4j:2.5.1")
 }
 
 val swaggerOutputDir = layout.buildDirectory.dir("docs")
