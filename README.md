@@ -4,7 +4,7 @@
 
 ## 开发技术栈
 
-- kotlin 2.3 (Java 25)
+- kotlin 2.4 (Java 25)
 - SpringBoot 4
   - spring-security
   - springdoc-openapi
@@ -20,6 +20,7 @@
 5. 运行 `./gradlew bootRun`, windows 环境为 `./gradlew.bat bootRun`
 6. 首次运行建议修改配置文件中的 `maa-copilot.task-cron.ark-level` 配置，这样可以将明日方舟中的关卡数据同步到你本地的
    数据库中，为了防止反复调用造成调试的麻烦，建议首次运行同步成功后再将配置修改回去
+7. 本项目使用 [ScalaR](https://github.com/ScalaR/ScalaR) 作为 OpenAPI 展示工具，本地启动时可通过 http://127.0.0.1:8848/scalar 调试
 
 ## 项目结构
 

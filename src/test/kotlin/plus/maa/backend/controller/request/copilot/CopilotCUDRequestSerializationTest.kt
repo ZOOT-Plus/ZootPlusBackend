@@ -12,7 +12,8 @@ import plus.maa.backend.service.model.CopilotSetStatus
 
 /**
  * Verifies the dual serialization contract of the sealed [CopilotCUDRequest]:
- * - kotlinx-serialization (runtime request body): discriminator `type`, snake_case.
+ * - kotlinx-serialization (runtime request body): discriminator `type`, snake_case,
+ *   and (compat) missing/null `type` defaults to PRTS so old MAA clients keep working.
  * - Jackson (SpringDoc/OpenAPI codegen): same discriminator + subtype mapping.
  *
  * If either side drifts, codegen produces a spec that doesn't match the runtime JSON.
@@ -55,8 +56,27 @@ class CopilotCUDRequestSerializationTest {
             CopilotCUDRequest.serializer(),
             VideoCUDRequest(content = "c", id = 3, status = CopilotSetStatus.PRIVATE),
         )
-        assertTrue(json.contains("\"type\":\"VIDEO\""), json)
-        assertTrue(json.contains("\"status\":\"PRIVATE\""), json)
+        assertTrue(json.contains("""type":"VIDEO"""), json)
+        assertTrue(json.contains("""status":"PRIVATE"""), json)
+    }
+
+    @Test
+    fun `kotlinx defaults missing type discriminator to PRTS for old-client compatibility`() {
+        // old MAA clients upload/update without a type field
+        val req: CopilotCUDRequest = ktx.decodeFromString(
+            """{"content":"{}","id":1,"status":"PUBLIC"}""",
+        )
+        assertTrue(req is PrtsCUDRequest)
+        assertEquals("{}", req.content)
+        assertEquals(1L, req.id)
+    }
+
+    @Test
+    fun `kotlinx treats explicit null type discriminator as PRTS`() {
+        val req: CopilotCUDRequest = ktx.decodeFromString(
+            """{"type":null,"content":"{}","id":2}""",
+        )
+        assertTrue(req is PrtsCUDRequest)
     }
 
     @Test
@@ -82,6 +102,6 @@ class CopilotCUDRequestSerializationTest {
         val json = jackson.writeValueAsString(
             PrtsCUDRequest(content = "c", id = 3, status = CopilotSetStatus.PRIVATE),
         )
-        assertTrue(json.contains("\"type\":\"PRTS\""), json)
+        assertTrue(json.contains("""type":"PRTS"""), json)
     }
 }
