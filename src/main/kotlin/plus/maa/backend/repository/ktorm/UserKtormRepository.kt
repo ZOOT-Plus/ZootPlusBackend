@@ -21,11 +21,13 @@ import org.ktorm.entity.any
 import org.ktorm.entity.filter
 import org.ktorm.entity.firstOrNull
 import org.ktorm.entity.removeIf
+import org.ktorm.entity.sequenceOf
 import org.ktorm.entity.toList
 import org.springframework.stereotype.Repository
 import org.springframework.transaction.annotation.Transactional
 import plus.maa.backend.repository.entity.MaaUser
 import plus.maa.backend.repository.entity.UserEntity
+import plus.maa.backend.repository.entity.UserFollowEntity
 import plus.maa.backend.repository.entity.UserFollows
 import plus.maa.backend.repository.entity.Users
 import java.time.LocalDateTime
@@ -107,6 +109,7 @@ class UserKtormRepository(
         database.insert(UserFollows) {
             set(it.userId, userId)
             set(it.followUserId, followUserId)
+            set(it.specialFollow, false)
             set(it.updatedAt, LocalDateTime.now())
         }
         database.update(Users) {
@@ -177,6 +180,42 @@ class UserKtormRepository(
             .toMap()
     }
 
+    fun findFollow(userId: Long, followUserId: Long): UserFollowEntity? {
+        return database.sequenceOf(UserFollows).firstOrNull {
+            (it.userId eq userId) and (it.followUserId eq followUserId)
+        }
+    }
+
+    fun setSpecialFollow(userId: Long, followUserId: Long, status: Boolean): Boolean {
+        val updatedRows = database.update(UserFollows) {
+            set(it.specialFollow, status)
+            where {
+                (it.userId eq userId) and (it.followUserId eq followUserId)
+            }
+        }
+        return updatedRows > 0
+    }
+
+    fun getSpecialFollowedTargetIds(userId: Long, targetIds: List<Long>): Set<Long> {
+        if (targetIds.isEmpty()) return emptySet()
+        return database.from(UserFollows)
+            .select(UserFollows.followUserId)
+            .where {
+                (UserFollows.userId eq userId) and
+                    (UserFollows.followUserId inList targetIds) and
+                    (UserFollows.specialFollow eq true)
+            }
+            .mapNotNull { it[UserFollows.followUserId] }
+            .toSet()
+    }
+
+    fun getSpecialFollowerIds(followUserId: Long): List<Long> {
+        return database.from(UserFollows)
+            .select(UserFollows.userId)
+            .where { (UserFollows.followUserId eq followUserId) and (UserFollows.specialFollow eq true) }
+            .mapNotNull { it[UserFollows.userId] }
+    }
+
     /**
      * 查询 fanIds 中谁关注了 userId，返回 fanId -> updatedAt 的映射
      */
@@ -216,6 +255,18 @@ class UserKtormRepository(
     fun isFollowing(userId: Long, followUserId: Long): Boolean {
         return database.from(UserFollows).select(UserFollows.userId)
             .where { (UserFollows.userId eq userId) and (UserFollows.followUserId eq followUserId) }
+            .limit(1)
+            .map { it[UserFollows.userId] }
+            .isNotEmpty()
+    }
+
+    fun isSpecialFollowing(userId: Long, followUserId: Long): Boolean {
+        return database.from(UserFollows).select(UserFollows.userId)
+            .where {
+                (UserFollows.userId eq userId) and
+                    (UserFollows.followUserId eq followUserId) and
+                    (UserFollows.specialFollow eq true)
+            }
             .limit(1)
             .map { it[UserFollows.userId] }
             .isNotEmpty()

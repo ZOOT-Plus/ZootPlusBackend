@@ -298,7 +298,10 @@ class UserService(
         val base = MaaUserInfo(userEntity)
         if (currentUserId == null) return base
         val relation = resolveRelation(currentUserId, targetId)
-        return base.copy(relation = relation)
+        return base.copy(
+            relation = relation,
+            specialFollow = currentUserId != targetId && userKtormRepository.isSpecialFollowing(currentUserId, targetId),
+        )
     }
 
     /**
@@ -316,6 +319,7 @@ class UserService(
         val iFollowIds = userKtormRepository.getFollowedTargetIds(currentUserId, ids)
         // 哪些目标关注了当前用户
         val theyFollowMeIds = userKtormRepository.getFollowerTargetIds(ids, currentUserId)
+        val specialFollowIds = userKtormRepository.getSpecialFollowedTargetIds(currentUserId, ids)
         return ids.mapNotNull { userMap[it] }.map { user ->
             val uid = user.userId
             val iFollow = uid in iFollowIds
@@ -327,7 +331,10 @@ class UserService(
                 theyFollow -> RelationType.FOLLOWED_BY
                 else -> RelationType.NONE
             }
-            MaaUserInfo(user).copy(relation = relation)
+            MaaUserInfo(user).copy(
+                relation = relation,
+                specialFollow = uid in specialFollowIds,
+            )
         }
     }
 

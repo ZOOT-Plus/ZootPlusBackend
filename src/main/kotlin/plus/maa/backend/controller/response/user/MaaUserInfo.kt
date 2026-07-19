@@ -19,6 +19,7 @@ data class MaaUserInfo(
     val followingCount: Int = 0,
     val fansCount: Int = 0,
     val relation: RelationType? = null,
+    val specialFollow: Boolean = false,
     @Contextual val followedAt: Instant? = null,
 ) {
     constructor(user: MaaUser) : this(
