@@ -8,7 +8,6 @@ import plus.maa.backend.controller.response.message.UnreadMessageCountInfo
 import plus.maa.backend.repository.entity.SiteMessageEntity
 import plus.maa.backend.repository.ktorm.SiteMessageKtormRepository
 import plus.maa.backend.repository.ktorm.UserKtormRepository
-import plus.maa.backend.service.model.SiteMessageType
 import java.time.LocalDateTime
 
 @Service
@@ -16,26 +15,20 @@ class SiteMessageService(
     private val siteMessageKtormRepository: SiteMessageKtormRepository,
     private val userKtormRepository: UserKtormRepository,
 ) {
-    fun notifyCopilotPublished(senderId: Long, copilotId: Long, copilotTitle: String) {
-        val receiverIds = userKtormRepository.getSpecialFollowerIds(senderId).distinct()
-        if (receiverIds.isEmpty()) return
-        val sender = userKtormRepository.findById(senderId) ?: return
-        val now = LocalDateTime.now()
+    fun notifyCopilotPublished(senderId: Long, copilotId: Long, copilotTitle: String): Int {
+        val sender = userKtormRepository.findById(senderId) ?: return 0
         val displayTitle = copilotTitle.ifBlank { "未命名作业" }
-        val messages = receiverIds.map { receiverId ->
-            SiteMessageEntity {
-                this.receiverId = receiverId
-                this.senderId = senderId
-                this.senderName = sender.userName
-                this.type = SiteMessageType.COPILOT_PUBLISHED
-                this.title = "特关作者发布了新作业"
-                this.content = "你特关的作者 @${sender.userName} 发布了新作业《$displayTitle》"
-                this.copilotId = copilotId
-                this.readAt = null
-                this.createdAt = now
-            }
-        }
-        siteMessageKtormRepository.insertAll(messages)
+        val title = "特关作者发布了新作业"
+        val content = "你特关的作者 @${sender.userName} 发布了新作业《$displayTitle》"
+        // 无特关粉丝时下面的 INSERT...SELECT 会自然插入 0 行并返回 0
+        return siteMessageKtormRepository.insertCopilotPublishedNotifications(
+            senderId = senderId,
+            senderName = sender.userName,
+            copilotId = copilotId,
+            title = title,
+            content = content,
+            createdAt = LocalDateTime.now(),
+        )
     }
 
     fun list(userId: Long, page: Int, size: Int, unreadOnly: Boolean): PagedDTO<SiteMessageInfo> {
@@ -55,12 +48,12 @@ class SiteMessageService(
         return UnreadMessageCountInfo(siteMessageKtormRepository.countUnreadByReceiverId(userId))
     }
 
-    fun markRead(userId: Long, id: Long) {
-        siteMessageKtormRepository.markRead(userId, id, LocalDateTime.now())
+    fun markRead(userId: Long, id: Long): Boolean {
+        return siteMessageKtormRepository.markRead(userId, id, LocalDateTime.now())
     }
 
-    fun markAllRead(userId: Long) {
-        siteMessageKtormRepository.markAllRead(userId, LocalDateTime.now())
+    fun markAllRead(userId: Long): Int {
+        return siteMessageKtormRepository.markAllRead(userId, LocalDateTime.now())
     }
 
     private fun toInfo(message: SiteMessageEntity) = SiteMessageInfo(

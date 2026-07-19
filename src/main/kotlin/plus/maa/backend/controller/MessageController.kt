@@ -46,20 +46,18 @@ class MessageController(
     }
 
     @Operation(summary = "标记单条站内信已读")
-    @ApiResponse(description = "标记结果")
+    @ApiResponse(description = "标记结果，true=确实标记成功，false=该消息不存在/已读/不属于当前用户")
     @RequireJwt
     @PostMapping("/read/{id}")
-    fun read(@PathVariable id: Long): MaaResult<Unit> {
-        siteMessageService.markRead(helper.userId, id)
-        return success()
+    fun read(@PathVariable id: Long): MaaResult<Boolean> {
+        return success(siteMessageService.markRead(helper.userId, id))
     }
 
     @Operation(summary = "标记全部站内信已读")
-    @ApiResponse(description = "标记结果")
+    @ApiResponse(description = "本次实际标记已读的条数")
     @RequireJwt
     @PostMapping("/readAll")
-    fun readAll(): MaaResult<Unit> {
-        siteMessageService.markAllRead(helper.userId)
-        return success()
+    fun readAll(): MaaResult<Int> {
+        return success(siteMessageService.markAllRead(helper.userId))
     }
 }

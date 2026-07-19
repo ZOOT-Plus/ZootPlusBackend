@@ -2,7 +2,6 @@ package plus.maa.backend.repository.ktorm
 
 import org.ktorm.database.Database
 import org.ktorm.dsl.and
-import org.ktorm.dsl.batchInsert
 import org.ktorm.dsl.desc
 import org.ktorm.dsl.eq
 import org.ktorm.dsl.isNull
@@ -24,6 +23,7 @@ import org.springframework.data.domain.Pageable
 import org.springframework.stereotype.Repository
 import plus.maa.backend.repository.entity.SiteMessageEntity
 import plus.maa.backend.repository.entity.SiteMessages
+import java.sql.Timestamp
 import java.time.LocalDateTime
 
 @Repository
@@ -31,21 +31,35 @@ class SiteMessageKtormRepository(
     database: Database,
 ) : KtormRepository<SiteMessageEntity, SiteMessages>(database, SiteMessages) {
 
-    fun insertAll(messages: List<SiteMessageEntity>) {
-        if (messages.isEmpty()) return
-        database.batchInsert(SiteMessages) {
-            messages.forEach { message ->
-                item {
-                    set(it.receiverId, message.receiverId)
-                    set(it.senderId, message.senderId)
-                    set(it.senderName, message.senderName)
-                    set(it.type, message.type)
-                    set(it.title, message.title)
-                    set(it.content, message.content)
-                    set(it.copilotId, message.copilotId)
-                    set(it.readAt, message.readAt)
-                    set(it.createdAt, message.createdAt)
-                }
+    /**
+     * 一条 SQL 完成对作者所有特关粉丝的「作业发布」站内信批量写入，
+     * 避免把粉丝列表与消息实体全部载入应用内存。返回受影响行数（即通知人数）。
+     */
+    fun insertCopilotPublishedNotifications(
+        senderId: Long,
+        senderName: String,
+        copilotId: Long,
+        title: String,
+        content: String,
+        createdAt: LocalDateTime,
+    ): Int {
+        val sql = """
+            INSERT INTO site_message
+              (receiver_id, sender_id, sender_name, type, title, content, copilot_id, read_at, created_at)
+            SELECT uf.user_id, ?, ?, 'COPILOT_PUBLISHED', ?, ?, ?, NULL, ?
+            FROM user_follow uf
+            WHERE uf.follow_user_id = ? AND uf.special_follow = TRUE
+        """.trimIndent()
+        return database.useConnection { conn ->
+            conn.prepareStatement(sql).use { ps ->
+                ps.setLong(1, senderId)
+                ps.setString(2, senderName)
+                ps.setString(3, title)
+                ps.setString(4, content)
+                ps.setLong(5, copilotId)
+                ps.setTimestamp(6, Timestamp.valueOf(createdAt))
+                ps.setLong(7, senderId)
+                ps.executeUpdate()
             }
         }
     }
