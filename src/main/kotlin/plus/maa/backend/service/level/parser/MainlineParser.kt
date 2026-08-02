@@ -42,7 +42,7 @@ class MainlineParser(
             stageCodeEncoded.split("-".toRegex()).dropLastWhile { it.isEmpty() }.toTypedArray()[0] // 10 (str)
         val chapter = chapterStr.toInt() // 10 (int)
 
-        val zone = dataHolder.findZone(level.levelId, tilePos.code!!, tilePos.stageId!!) ?: return null
+        val zone = dataHolder.findZone(level.levelId, tilePos.code, tilePos.stageId!!) ?: return null
 
         val catTwo = parseZoneName(zone)
         level.catTwo = catTwo

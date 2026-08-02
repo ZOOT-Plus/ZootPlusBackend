@@ -27,7 +27,7 @@ class LegionParser(
     override fun parseLevel(level: ArkLevel, tilePos: ArkTilePos): ArkLevel? {
         level.catOne = ArkLevelType.LEGION.display
 
-        val stage = dataHolder.findStage(level.levelId!!, tilePos.code!!, tilePos.stageId!!)
+        val stage = dataHolder.findStage(level.levelId!!, tilePos.code, tilePos.stageId!!)
         if (stage == null) {
             log.error { "[PARSER]保全派驻关卡未找到stage信息: ${level.levelId}" }
             return null

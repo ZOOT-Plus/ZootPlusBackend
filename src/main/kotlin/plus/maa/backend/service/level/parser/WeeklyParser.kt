@@ -26,7 +26,7 @@ class WeeklyParser(
     override fun parseLevel(level: ArkLevel, tilePos: ArkTilePos): ArkLevel? {
         level.catOne = ArkLevelType.WEEKLY.display
 
-        val zone = dataHolder.findZone(level.levelId!!, tilePos.code!!, tilePos.stageId!!)
+        val zone = dataHolder.findZone(level.levelId!!, tilePos.code, tilePos.stageId!!)
             ?: return null
 
         level.catTwo = zone.zoneNameSecond

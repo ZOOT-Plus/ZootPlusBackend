@@ -34,7 +34,7 @@ class ArkGameDataHolder private constructor(
         return stageMap[stageId]
     }
 
-    fun findZone(levelId: String, code: String, stageId: String): ArkZone? {
+    fun findZone(levelId: String, code: String?, stageId: String): ArkZone? {
         val stage = findStage(levelId, code, stageId)
         if (stage == null) {
             log.error { "stage不存在:$stageId, Level: $levelId" }
