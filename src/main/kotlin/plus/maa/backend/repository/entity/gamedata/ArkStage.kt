@@ -20,5 +20,5 @@ data class ArkStage(
     /**
      * 例: CB-EX8
      */
-    val code: String,
+    val code: String?,
 )
