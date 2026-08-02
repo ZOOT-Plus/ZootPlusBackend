@@ -24,7 +24,7 @@ class ActivityParser(
     override fun parseLevel(level: ArkLevel, tilePos: ArkTilePos): ArkLevel? {
         level.catOne = ArkLevelType.ACTIVITIES.display
 
-        val stage = dataHolder.findStage(level.levelId!!, tilePos.code!!, tilePos.stageId!!)
+        val stage = dataHolder.findStage(level.levelId!!, tilePos.code, tilePos.stageId!!)
         level.catTwo = stage?.zoneId
             ?.let { dataHolder.findActivityByZoneId(it) }
             ?.name ?: ""
