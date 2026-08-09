@@ -1,23 +1,12 @@
 package plus.maa.backend.service
 
 import io.github.oshai.kotlinlogging.KotlinLogging
-import org.ktorm.database.Database
-import org.ktorm.dsl.desc
-import org.ktorm.dsl.eq
-import org.ktorm.dsl.like
-import org.ktorm.entity.drop
-import org.ktorm.entity.filter
-import org.ktorm.entity.firstOrNull
-import org.ktorm.entity.sortedBy
-import org.ktorm.entity.take
-import org.ktorm.entity.toList
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.http.HttpStatus
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Service
 import org.springframework.web.server.ResponseStatusException
 import plus.maa.backend.common.MaaStatusCode
-import plus.maa.backend.common.extensions.toMaaUser
 import plus.maa.backend.controller.request.user.LoginDTO
 import plus.maa.backend.controller.request.user.PasswordResetDTO
 import plus.maa.backend.controller.request.user.RegisterDTO
@@ -29,8 +18,8 @@ import plus.maa.backend.controller.response.user.MaaUserInfo
 import plus.maa.backend.controller.response.user.RelationType
 import plus.maa.backend.repository.entity.MaaUser
 import plus.maa.backend.repository.entity.UserEntity
-import plus.maa.backend.repository.entity.users
-import plus.maa.backend.repository.ktorm.UserKtormRepository
+import plus.maa.backend.repository.entity.toMaaUser
+import plus.maa.backend.repository.ktorm.UserRepository
 import plus.maa.backend.service.jwt.JwtExpiredException
 import plus.maa.backend.service.jwt.JwtInvalidException
 import plus.maa.backend.service.jwt.JwtService
@@ -43,8 +32,7 @@ import plus.maa.backend.cache.InternalComposeCache as Cache
  */
 @Service
 class UserService(
-    private val database: Database,
-    private val userKtormRepository: UserKtormRepository,
+    private val userRepository: UserRepository,
     private val emailService: EmailService,
     private val passwordEncoder: PasswordEncoder,
     private val userDetailService: UserDetailServiceImpl,
@@ -59,7 +47,7 @@ class UserService(
      * @return 携带了token的封装类
      */
     fun login(loginDTO: LoginDTO): MaaLoginRsp {
-        val user = userKtormRepository.findByEmail(loginDTO.email)
+        val user = userRepository.findByEmail(loginDTO.email)
         if (user == null || !passwordEncoder.matches(loginDTO.password, user.password)) {
             throw MaaResultException(401, "用户不存在或者密码错误")
         }
@@ -91,7 +79,7 @@ class UserService(
      * @param rawPassword 新密码
      */
     fun modifyPassword(userId: Long, rawPassword: String, originPassword: String? = null, verifyOriginPassword: Boolean = true) {
-        val userEntity = userKtormRepository.findById(userId) ?: return
+        val userEntity = userRepository.findById(userId) ?: return
         val maaUser = userEntity.toMaaUser()
         if (verifyOriginPassword) {
             check(!originPassword.isNullOrEmpty()) {
@@ -108,7 +96,7 @@ class UserService(
         // 修改密码的逻辑，应当使用与 authentication provider 一致的编码器
         userEntity.password = passwordEncoder.encode(rawPassword)!!
         userEntity.pwdUpdateTime = Instant.now()
-        userKtormRepository.save(userEntity)
+        userRepository.save(userEntity)
         Cache.invalidateMaaUserById(userId.toString())
     }
 
@@ -121,7 +109,7 @@ class UserService(
     fun register(registerDTO: RegisterDTO): MaaUserInfo {
         val userName = registerDTO.userName.trim()
         check(userName.length in 4..24) { "用户名长度应在4-24位之间" }
-        check(!userKtormRepository.existsByUserName(userName)) {
+        check(!userRepository.existsByUserName(userName)) {
             "用户名已存在，请重新取个名字吧"
         }
 
@@ -138,8 +126,8 @@ class UserService(
             pwdUpdateTime = Instant.now(),
         )
         return try {
-            val entity = userKtormRepository.createFromMaaUser(maaUser)
-            userKtormRepository.save(entity)
+            val entity = userRepository.createFromMaaUser(maaUser)
+            userRepository.save(entity)
             MaaUserInfo(entity).also {
                 Cache.invalidateMaaUserById(it.id)
             }
@@ -155,7 +143,7 @@ class UserService(
      * @param updateDTO 更新参数
      */
     fun updateUserInfo(userId: Long, updateDTO: UserInfoUpdateDTO) {
-        val userEntity = userKtormRepository.findById(userId) ?: return
+        val userEntity = userRepository.findById(userId) ?: return
         val newName = updateDTO.userName.trim()
         if (newName == userEntity.userName) {
             // 暂时只支持修改用户名，如果有其他字段修改需要同步修改该逻辑
@@ -163,11 +151,11 @@ class UserService(
         }
         check(newName.length in 4..24) { "用户名长度应在4-24位之间" }
         // 用户名需要trim
-        check(!userKtormRepository.existsByUserName(newName)) {
+        check(!userRepository.existsByUserName(newName)) {
             "用户名已存在，请重新取个名字吧"
         }
         userEntity.userName = newName
-        userKtormRepository.save(userEntity)
+        userRepository.save(userEntity)
         Cache.invalidateMaaUserById(userId.toString())
     }
 
@@ -181,7 +169,7 @@ class UserService(
             val old = jwtService.verifyAndParseRefreshToken(token)
 
             val userId = old.subject.toLongOrNull() ?: throw NoSuchElementException()
-            val userEntity = userKtormRepository.findById(userId) ?: throw NoSuchElementException()
+            val userEntity = userRepository.findById(userId) ?: throw NoSuchElementException()
             val user = userEntity.toMaaUser()
             if (old.issuedAt.isBefore(user.pwdUpdateTime)) {
                 throw MaaResultException(401, "invalid token")
@@ -221,7 +209,7 @@ class UserService(
      */
     fun modifyPasswordByActiveCode(passwordResetDTO: PasswordResetDTO) {
         emailService.verifyVCode(passwordResetDTO.email, passwordResetDTO.activeCode)
-        val userEntity = userKtormRepository.findByEmail(passwordResetDTO.email)
+        val userEntity = userRepository.findByEmail(passwordResetDTO.email)
         modifyPassword(userEntity!!.userId, passwordResetDTO.password, verifyOriginPassword = false)
     }
 
@@ -231,7 +219,7 @@ class UserService(
      * @param email 用户邮箱
      */
     fun checkUserExistByEmail(email: String) {
-        if (null == userKtormRepository.findByEmail(email)) {
+        if (null == userRepository.findByEmail(email)) {
             throw MaaResultException(MaaStatusCode.MAA_USER_NOT_FOUND)
         }
     }
@@ -241,7 +229,7 @@ class UserService(
      */
     fun sendRegistrationToken(regDTO: SendRegistrationTokenDTO) {
         // 判断用户是否存在
-        val userEntity = userKtormRepository.findByEmail(regDTO.email)
+        val userEntity = userRepository.findByEmail(regDTO.email)
         if (userEntity != null) {
             // 用户已存在
             log.info { "send registration token: user exists for email: ${regDTO.email}" }
@@ -251,14 +239,14 @@ class UserService(
         emailService.sendVCode(regDTO.email)
     }
 
-    fun findByUserIdOrDefault(id: Long) = database.users.filter { it.userId eq id }.firstOrNull() ?: UserEntity.UNKNOWN
+    fun findByUserIdOrDefault(id: Long) = userRepository.findById(id) ?: UserEntity.UNKNOWN
 
     fun findByUserIdOrDefaultInCache(id: Long): UserEntity {
         return Cache.getMaaUserCache(id.toString()) { findByUserIdOrDefault(id) }
     }
 
     fun findByUsersId(ids: Iterable<Long>): UserDict {
-        return userKtormRepository.findAllById(ids).map { it.toMaaUser() }.let { UserDict(it) }
+        return userRepository.findAllById(ids).map { it.toMaaUser() }.let { UserDict(it) }
     }
 
     class UserDict(users: List<MaaUser>) {
@@ -267,24 +255,20 @@ class UserService(
         fun getOrDefault(id: Long) = get(id) ?: MaaUser.UNKNOWN
     }
 
-    fun get(userId: Long): MaaUserInfo? = database.users.filter { it.userId eq userId }.firstOrNull()?.run(::MaaUserInfo)
+    fun get(userId: Long): MaaUserInfo? = userRepository.findById(userId)?.run(::MaaUserInfo)
 
     /**
-     * 用户模糊搜索
+     * 用户名模糊搜索（LIKE 通配符转义，搜索词中的 %/_ 按字面匹配；粉丝数降序 + 分页）
      */
     fun search(userName: String, offset: Int, limit: Int): List<UserEntity> {
-        return database.users.filter { it.userName like "%$userName%" }
-            .sortedBy { it.fansCount.desc() }
-            .drop(offset)
-            .take(limit)
-            .toList()
+        return userRepository.searchByUserName(userName, offset, limit)
     }
 
     /**
      * 获取当前登录用户信息
      */
     fun getMe(userId: Long): MaaUserInfo {
-        val userEntity = userKtormRepository.findById(userId)
+        val userEntity = userRepository.findById(userId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
         return MaaUserInfo(userEntity)
     }
@@ -293,14 +277,14 @@ class UserService(
      * 获取用户信息并附带与当前用户的关系
      */
     fun getWithRelation(targetId: Long, currentUserId: Long?): MaaUserInfo {
-        val userEntity = userKtormRepository.findById(targetId)
+        val userEntity = userRepository.findById(targetId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
         val base = MaaUserInfo(userEntity)
         if (currentUserId == null) return base
         val relation = resolveRelation(currentUserId, targetId)
         return base.copy(
             relation = relation,
-            specialFollow = currentUserId != targetId && userKtormRepository.isSpecialFollowing(currentUserId, targetId),
+            specialFollow = currentUserId != targetId && userRepository.isSpecialFollowing(currentUserId, targetId),
         )
     }
 
@@ -309,17 +293,17 @@ class UserService(
      */
     fun getBatchUserInfos(ids: List<Long>, currentUserId: Long?): List<MaaUserInfo> {
         if (ids.isEmpty()) return emptyList()
-        val users = userKtormRepository.findAllById(ids)
+        val users = userRepository.findAllById(ids)
         // 保证结果顺序与输入 ids 一致
         val userMap = users.associateBy { it.userId }
         if (currentUserId == null) {
             return ids.mapNotNull { userMap[it] }.map { MaaUserInfo(it) }
         }
         // 当前用户关注了哪些目标
-        val iFollowIds = userKtormRepository.getFollowedTargetIds(currentUserId, ids)
+        val iFollowIds = userRepository.getFollowedTargetIds(currentUserId, ids)
         // 哪些目标关注了当前用户
-        val theyFollowMeIds = userKtormRepository.getFollowerTargetIds(ids, currentUserId)
-        val specialFollowIds = userKtormRepository.getSpecialFollowedTargetIds(currentUserId, ids)
+        val theyFollowMeIds = userRepository.getFollowerTargetIds(ids, currentUserId)
+        val specialFollowIds = userRepository.getSpecialFollowedTargetIds(currentUserId, ids)
         return ids.mapNotNull { userMap[it] }.map { user ->
             val uid = user.userId
             val iFollow = uid in iFollowIds
@@ -343,8 +327,8 @@ class UserService(
      */
     private fun resolveRelation(currentUserId: Long, targetUserId: Long): RelationType {
         if (currentUserId == targetUserId) return RelationType.SELF
-        val iFollow = userKtormRepository.isFollowing(currentUserId, targetUserId)
-        val theyFollow = userKtormRepository.isFollowing(targetUserId, currentUserId)
+        val iFollow = userRepository.isFollowing(currentUserId, targetUserId)
+        val theyFollow = userRepository.isFollowing(targetUserId, currentUserId)
         return when {
             iFollow && theyFollow -> RelationType.MUTUAL
             iFollow -> RelationType.FOLLOWING

@@ -1,31 +1,12 @@
 package plus.maa.backend.task
 
-import org.ktorm.database.Database
-import org.ktorm.dsl.and
-import org.ktorm.dsl.batchUpdate
-import org.ktorm.dsl.count
-import org.ktorm.dsl.eq
-import org.ktorm.dsl.from
-import org.ktorm.dsl.groupBy
-import org.ktorm.dsl.gte
-import org.ktorm.dsl.inList
-import org.ktorm.dsl.map
-import org.ktorm.dsl.select
-import org.ktorm.dsl.where
-import org.ktorm.entity.count
-import org.ktorm.entity.drop
-import org.ktorm.entity.filter
-import org.ktorm.entity.take
-import org.ktorm.entity.toList
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import plus.maa.backend.repository.RedisCache
 import plus.maa.backend.repository.entity.CopilotEntity
-import plus.maa.backend.repository.entity.Copilots
 import plus.maa.backend.repository.entity.Rating
-import plus.maa.backend.repository.entity.Ratings
-import plus.maa.backend.repository.entity.copilots
-import plus.maa.backend.repository.ktorm.CopilotKtormRepository
+import plus.maa.backend.repository.ktorm.CopilotRepository
+import plus.maa.backend.repository.ktorm.RatingRepository
 import plus.maa.backend.service.CopilotService.Companion.getHotScore
 import plus.maa.backend.service.level.ArkLevelService
 import plus.maa.backend.service.model.RatingCount
@@ -40,8 +21,8 @@ import java.time.LocalDateTime
  */
 @Component
 class CopilotScoreRefreshTask(
-    private val copilotRepo: CopilotKtormRepository,
-    private val database: Database,
+    private val copilotRepo: CopilotRepository,
+    private val ratingRepo: RatingRepository,
     private val arkLevelService: ArkLevelService,
     private val redisCache: RedisCache,
 ) {
@@ -53,9 +34,8 @@ class CopilotScoreRefreshTask(
         // 分页获取所有未删除的作业
         var offset = 0
         val pageSize = 1000
-        val query = copilotRepo.getNotDeletedQuery()
-        val count = query.count()
-        var copilots = query.take(pageSize).drop(offset).toList()
+        val count = copilotRepo.countNotDeleted()
+        var copilots = copilotRepo.findNotDeletedPage(offset, pageSize)
 
         // 循环读取直到没有未删除的作业为止
         while (copilots.isNotEmpty()) {
@@ -65,12 +45,11 @@ class CopilotScoreRefreshTask(
             refresh(copilotIds, copilots)
             // 获取下一页
             offset += pageSize
-            if (offset >= count) {
+            if (offset.toLong() >= count) {
                 // 没有下一页了，跳出循环
                 break
             }
-            offset += pageSize
-            copilots = query.take(pageSize).drop(offset).toList()
+            copilots = copilotRepo.findNotDeletedPage(offset, pageSize)
         }
 
         // 移除首页热度缓存
@@ -89,9 +68,7 @@ class CopilotScoreRefreshTask(
             return
         }
 
-        val copilots = database.copilots.filter {
-            (it.copilotId inList copilotIds) and (it.delete eq false)
-        }.toList()
+        val copilots = copilotRepo.findByIdsAndNotDeleted(copilotIds)
         if (copilots.isEmpty()) {
             return
         }
@@ -130,33 +107,15 @@ class CopilotScoreRefreshTask(
             }
             copilot.hotScore = hotScore
         }
-        // 批量更新热度值
-        database.batchUpdate(Copilots) {
-            for (copilot in copilots) {
-                item {
-                    set(it.hotScore, copilot.hotScore)
-                    where { it.copilotId eq copilot.copilotId }
-                }
-            }
-        }
+        copilotRepo.batchUpdateHotScores(copilots.associate { it.copilotId to it.hotScore })
     }
 
     private fun counts(keys: Collection<String?>, rating: RatingType, startTime: LocalDateTime): List<RatingCount> {
-        // 使用Ktorm DSL进行GROUP BY查询，等价于MongoDB的聚合操作
-        return database.from(Ratings)
-            .select(Ratings.key, count(Ratings.id))
-            .where {
-                (Ratings.type eq Rating.KeyType.COPILOT) and
-                    (Ratings.key inList keys.filterNotNull()) and
-                    (Ratings.rating eq rating) and
-                    (Ratings.rateTime gte startTime)
-            }
-            .groupBy(Ratings.key)
-            .map { row ->
-                RatingCount(
-                    key = row[Ratings.key]!!,
-                    count = row.getLong(2),
-                )
-            }
+        return ratingRepo.countByTypeKeyInRatingAfter(
+            Rating.KeyType.COPILOT,
+            keys.filterNotNull(),
+            rating,
+            startTime,
+        )
     }
 }

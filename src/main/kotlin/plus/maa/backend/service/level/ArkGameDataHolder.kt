@@ -28,7 +28,7 @@ class ArkGameDataHolder private constructor(
 
     fun findStage(levelId: String, code: String?, stageId: String): ArkStage? {
         val stage = levelStageMap[levelId.lowercase(Locale.getDefault())]
-        if (stage != null && stage.code.equals(code, ignoreCase = true)) {
+        if (stage != null && stage.code?.equals(code, ignoreCase = true) == true) {
             return stage
         }
         return stageMap[stageId]

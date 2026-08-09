@@ -22,6 +22,30 @@
    数据库中，为了防止反复调用造成调试的麻烦，建议首次运行同步成功后再将配置修改回去
 7. 本项目使用 [ScalaR](https://github.com/ScalaR/ScalaR) 作为 OpenAPI 展示工具，本地启动时可通过 http://127.0.0.1:8848/scalar 调试
 
+## 数据库迁移（Flyway）
+
+本项目使用 [Flyway](https://flywaydb.org/) 管理数据库 Schema，迁移脚本位于 `src/main/resources/db/migration/`，首次接入由 `V1__init.sql` 建表。Spring Boot 会在应用启动时自动执行迁移（`spring.flyway.enabled: true`）。
+
+### 已有库表的老项目接入
+
+如果你的数据库已经通过 `docker/init.sql` 等方式建好全部表，**首次启动接入 Flyway 前必须先建立 baseline**，否则 Flyway 会在「非空 schema 且无 `flyway_schema_history` 表」时直接报错，导致应用启动失败。
+
+操作方法：在 `application.yml`（或你的 `application-prod.yml` / `application-dev.yml`）中打开以下两项注释：
+
+```yaml
+spring:
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    baseline-version: 1   # V1__init.sql 视为已应用并跳过，不会重建/破坏现有表
+```
+
+首次启动后 Flyway 会创建 `flyway_schema_history` 并写入 baseline（版本 1），`V1__init.sql` 因版本号 ≤ baseline 被跳过，后续 `V2__...` 迁移才会真正执行。baseline 成功后即可把这两项重新注释掉。
+
+> 注意：baseline 跳过的 `V1__init.sql` 并不保证与线上实际结构完全一致（存在个别默认值差异），后续新增迁移若依赖「V1 = 当前线上结构」这一假设时请另行核对。
+
+全新空库无需此操作，`V1__init.sql` 会正常建表。
+
 ## 项目结构
 
 - config # 存放 spring 配置

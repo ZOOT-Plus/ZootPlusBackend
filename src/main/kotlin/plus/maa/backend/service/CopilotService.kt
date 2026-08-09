@@ -5,28 +5,6 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import org.ktorm.database.Database
-import org.ktorm.dsl.and
-import org.ktorm.dsl.asc
-import org.ktorm.dsl.batchInsert
-import org.ktorm.dsl.delete
-import org.ktorm.dsl.desc
-import org.ktorm.dsl.eq
-import org.ktorm.dsl.from
-import org.ktorm.dsl.inList
-import org.ktorm.dsl.like
-import org.ktorm.dsl.notInList
-import org.ktorm.dsl.select
-import org.ktorm.dsl.where
-import org.ktorm.entity.drop
-import org.ktorm.entity.filter
-import org.ktorm.entity.forEach
-import org.ktorm.entity.sortedBy
-import org.ktorm.entity.take
-import org.ktorm.entity.toList
-import org.ktorm.expression.ArgumentExpression
-import org.ktorm.schema.BooleanSqlType
-import org.ktorm.schema.ColumnDeclaring
 import org.springframework.stereotype.Service
 import plus.maa.backend.cache.transfer.CopilotInnerCacheInfo
 import plus.maa.backend.common.Constants.COPILOT_VIEW_KEY
@@ -39,11 +17,11 @@ import plus.maa.backend.config.external.MaaCopilotProperties
 import plus.maa.backend.controller.request.copilot.CopilotCUDRequest
 import plus.maa.backend.controller.request.copilot.CopilotContentDTO
 import plus.maa.backend.controller.request.copilot.CopilotQueriesRequest
+import plus.maa.backend.controller.request.copilot.CopilotRatingReq
 import plus.maa.backend.controller.request.copilot.PrtsCUDRequest
 import plus.maa.backend.controller.request.copilot.PrtsDTO
 import plus.maa.backend.controller.request.copilot.VideoCUDRequest
 import plus.maa.backend.controller.request.copilot.VideoDTO
-import plus.maa.backend.controller.request.copilot.CopilotRatingReq
 import plus.maa.backend.controller.response.MaaResultException
 import plus.maa.backend.controller.response.copilot.CopilotInfo
 import plus.maa.backend.controller.response.copilot.CopilotPageInfo
@@ -51,14 +29,12 @@ import plus.maa.backend.repository.RedisCache
 import plus.maa.backend.repository.entity.Copilot
 import plus.maa.backend.repository.entity.Copilot.OperationGroup
 import plus.maa.backend.repository.entity.CopilotEntity
-import plus.maa.backend.repository.entity.Operators
 import plus.maa.backend.repository.entity.RatingEntity
 import plus.maa.backend.repository.entity.UserEntity
-import plus.maa.backend.repository.entity.UserFollows
-import plus.maa.backend.repository.entity.copilots
-import plus.maa.backend.repository.entity.users
-import plus.maa.backend.repository.ktorm.CommentsAreaKtormRepository
-import plus.maa.backend.repository.ktorm.CopilotKtormRepository
+import plus.maa.backend.repository.ktorm.CommentsAreaRepository
+import plus.maa.backend.repository.ktorm.CopilotQueryRequest
+import plus.maa.backend.repository.ktorm.CopilotRepository
+import plus.maa.backend.repository.ktorm.UserRepository
 import plus.maa.backend.service.level.ArkLevelService
 import plus.maa.backend.service.model.CommentStatus
 import plus.maa.backend.service.model.CopilotSetStatus
@@ -83,14 +59,14 @@ import plus.maa.backend.cache.InternalComposeCache as Cache
  */
 @Service
 class CopilotService(
-    private val database: Database,
-    private val copilotKtormRepository: CopilotKtormRepository,
+    private val copilotRepository: CopilotRepository,
     private val ratingService: RatingService,
     private val json: Json,
     private val levelService: ArkLevelService,
     private val redisCache: RedisCache,
     private val userRepository: UserService,
-    private val commentsAreaKtormRepository: CommentsAreaKtormRepository,
+    private val userRepo: UserRepository,
+    private val commentsAreaRepository: CommentsAreaRepository,
     private val properties: MaaCopilotProperties,
     private val sensitiveWordService: SensitiveWordService,
     private val segmentService: SegmentService,
@@ -140,10 +116,9 @@ class CopilotService(
     }
 
     /** 从原始内容 JSON 中提取 video_url（PRTS 为 null） */
-    private fun extractVideoUrl(content: String): String? =
-        runCatching {
-            json.parseToJsonElement(content).jsonObject["video_url"]?.jsonPrimitive?.content
-        }.getOrNull()
+    private fun extractVideoUrl(content: String): String? = runCatching {
+        json.parseToJsonElement(content).jsonObject["video_url"]?.jsonPrimitive?.content
+    }.getOrNull()
 
     /**
      * 上传新的作业
@@ -152,39 +127,32 @@ class CopilotService(
         val dto = request.parseContent()
         val now = LocalDateTime.now()
 
-        val entity = CopilotEntity {
-            this.type = request.copilotType()
-            this.stageName = dto.stageName
-            this.uploaderId = loginUserId
-            this.views = 0L
-            this.ratingLevel = 0
-            this.ratingRatio = 0.0
-            this.likeCount = 0L
-            this.dislikeCount = 0L
-            this.hotScore = 0.0
-            this.title = dto.doc?.title ?: ""
-            this.details = dto.doc?.details
-            this.firstUploadTime = now
-            this.uploadTime = now
-            this.content = request.content
-            this.status = request.status
-            this.commentStatus = CommentStatus.ENABLED
-            this.delete = false
-            this.deleteTime = null
-            this.notification = false
-        }
-        copilotKtormRepository.insertEntity(entity)
+        val entity = CopilotEntity(
+            type = request.copilotType(),
+            stageName = dto.stageName,
+            uploaderId = loginUserId,
+            views = 0L,
+            ratingLevel = 0,
+            ratingRatio = 0.0,
+            likeCount = 0L,
+            dislikeCount = 0L,
+            hotScore = 0.0,
+            title = dto.doc?.title ?: "",
+            details = dto.doc?.details,
+            firstUploadTime = now,
+            uploadTime = now,
+            content = request.content,
+            status = request.status,
+            commentStatus = CommentStatus.ENABLED,
+            delete = false,
+            deleteTime = null,
+            notification = false,
+        )
+        copilotRepository.insertEntity(entity)
         val copilotId = entity.copilotId
         val opers = dto.opers
         if (!opers.isNullOrEmpty()) {
-            database.batchInsert(Operators) {
-                opers.map { op ->
-                    item {
-                        set(it.copilotId, copilotId)
-                        set(it.name, op.name)
-                    }
-                }
-            }
+            copilotRepository.insertOperators(copilotId, opers.map { it.name })
         }
         segmentService.updateIndex(copilotId, entity.title, entity.details)
         if (request.status == CopilotSetStatus.PUBLIC) {
@@ -215,7 +183,7 @@ class CopilotService(
      */
     fun getCopilotById(userIdOrIpAddress: String, id: Long): CopilotInfo? {
         val result = Cache.getCopilotCache(id) {
-            copilotKtormRepository.findNotDeletedCopilotId(id)?.run {
+            copilotRepository.findNotDeletedCopilotId(id)?.run {
                 CopilotInnerCacheInfo(this.copy())
             }
         }?.let {
@@ -223,7 +191,7 @@ class CopilotService(
             val maaUser = userRepository.findByUserIdOrDefaultInCache(copilot.uploaderId)
 
             val commentsCount = Cache.getCommentCountCache(copilot.copilotId) { cid ->
-                commentsAreaKtormRepository.countByCopilotId(cid, false)
+                commentsAreaRepository.countByCopilotId(cid, false)
             }
             // 查询个人评分（支持 userId 或 IP 地址）
             val personalRating = ratingService.findPersonalRatingOfCopilot(userIdOrIpAddress, id)
@@ -247,7 +215,7 @@ class CopilotService(
                 second.incrementAndGet()
                 // 丢到调度队列中, 一致性要求不高
                 Thread.startVirtualThread {
-                    copilotKtormRepository.incrViews(id)
+                    copilotRepository.incrViews(id)
                 }
             }
         }?.run {
@@ -363,84 +331,37 @@ class CopilotService(
             }
         }
 
-        val copilotsSeq = database.copilots.filter {
-            val conditions = ArrayList<ColumnDeclaring<Boolean>>()
-            conditions += ArgumentExpression(true, BooleanSqlType)
-            conditions += it.delete eq false
-            if (request.type != null) {
-                conditions += it.type eq request.type
-            }
-            if (requestStatus != null) {
-                conditions += it.status eq requestStatus
-            }
-            if (stageNameKeyword != null) {
-                conditions += it.stageName like stageNameKeyword
-            }
-            if (stageNames != null) {
-                conditions += it.stageName inList stageNames
-            }
-            if (inUserIds != null) {
-                conditions += it.uploaderId inList inUserIds
-            }
-            if (inCopilotIds != null) {
-                conditions += it.copilotId inList inCopilotIds
-            }
-            if (request.onlyFollowing && userId != null) {
-                conditions += it.uploaderId inList (
-                    database.from(UserFollows)
-                        .select(UserFollows.followUserId)
-                        .where { UserFollows.userId eq userId }
-                    )
-            }
-            if (includeOps != null) {
-                conditions += it.copilotId inList (
-                    database.from(Operators)
-                        .select(Operators.copilotId)
-                        .where { Operators.name inList includeOps }
-                    )
-            }
-            if (notIncludeOps != null) {
-                conditions += it.copilotId notInList (
-                    database.from(Operators)
-                        .select(Operators.copilotId)
-                        .where { Operators.name inList notIncludeOps }
-                    )
-            }
-            conditions.reduce { a, b -> a and b }
-        }.sortedBy {
-            val ord = when (request.orderBy ?: "id") {
-                "hot" -> it.hotScore
-                "id" -> it.copilotId
-                "views" -> it.views
-                else -> it.copilotId
-            }
-            if (request.desc) {
-                ord.desc()
-            } else {
-                ord.asc()
-            }
-        }.drop((page - 1) * limit).take(limit)
+        val (copilots, count) = copilotRepository.queryCopilots(
+            CopilotQueryRequest(
+                type = request.type,
+                status = requestStatus,
+                stageNameKeyword = stageNameKeyword,
+                stageNames = stageNames,
+                inUserIds = inUserIds,
+                inCopilotIds = inCopilotIds,
+                onlyFollowingUserId = if (request.onlyFollowing) userId else null,
+                includeOps = includeOps,
+                notIncludeOps = notIncludeOps,
+                orderBy = request.orderBy ?: "id",
+                desc = request.desc,
+                page = page,
+                limit = limit,
+            ),
+        )
 
-        val resultAgg = if (keyword.isNullOrEmpty() &&
+        val hasNext = if (keyword.isNullOrEmpty() &&
             request.levelKeyword.isNullOrBlank() &&
             request.uploaderId != null &&
             request.uploaderId != ME &&
             request.operator.isNullOrBlank() &&
             request.copilotIds.isNullOrEmpty()
         ) {
-            val r = copilotsSeq.toList()
-            val count = copilotsSeq.totalRecordsInAllPages
-            val hasNext = count > (page * limit)
-            (r to count) to hasNext
+            // 聚合分支：hasNext 用总数判断
+            count > (page * limit)
         } else {
-            val r = copilotsSeq.toList()
-            val count = copilotsSeq.totalRecordsInAllPages
-            (r to count) to (r.size >= limit)
+            // 非聚合分支：hasNext 用当前页大小判断
+            copilots.size >= limit
         }
-
-        val count = resultAgg.first.second
-        val copilots: List<CopilotEntity> = resultAgg.first.first
-        val hasNext = resultAgg.second
 
         val userIds = copilots.map { it.uploaderId }
 
@@ -453,7 +374,7 @@ class CopilotService(
             info == null
         }.toList()
         if (remainingUserIds.isNotEmpty()) {
-            val users = database.users.filter { it.userId inList remainingUserIds }
+            val users = userRepo.findAllById(remainingUserIds)
             users.forEach {
                 maaUsers[it.userId] = it
                 Cache.setUserCache(it.userId.toString(), it)
@@ -470,7 +391,7 @@ class CopilotService(
         }.toList()
 
         if (remainingCopilotIds.isNotEmpty()) {
-            val existedCount = commentsAreaKtormRepository.findByCopilotId(remainingCopilotIds, false)
+            val existedCount = commentsAreaRepository.findByCopilotId(remainingCopilotIds, false)
                 .groupBy { it.copilotId }
                 .mapValues { it.value.size.toLong() }
             copilotIds.forEach { copilotId ->
@@ -499,7 +420,7 @@ class CopilotService(
         }
 
         // 封装数据
-        val data = CopilotPageInfo(hasNext, page, count.toLong(), infos)
+        val data = CopilotPageInfo(hasNext, page, count, infos)
 
         // 决定是否缓存
         if (cacheKey.get() != null) {
@@ -539,20 +460,7 @@ class CopilotService(
         }.apply {
             Cache.invalidateCopilotInfoByCid(copilotId)
             segmentService.updateIndex(copilotId, title, details)
-            database.delete(Operators) {
-                it.copilotId eq copilotId
-            }
-            val opers = dto.opers
-            if (!opers.isNullOrEmpty()) {
-                database.batchInsert(Operators) {
-                    opers.map { op ->
-                        item {
-                            set(it.copilotId, copilotId)
-                            set(it.name, op.name)
-                        }
-                    }
-                }
-            }
+            copilotRepository.replaceOperators(copilotId, dto.opers?.map { it.name } ?: emptyList())
         }
 
         cIdToDeleteCache?.let {
@@ -567,7 +475,7 @@ class CopilotService(
      * @param userIdOrIpAddress 用于已登录用户作出评分
      */
     fun rates(userIdOrIpAddress: String, request: CopilotRatingReq) {
-        requireNotNull(copilotKtormRepository.existsByCopilotId(request.id)) { "作业id不存在" }
+        requireNotNull(copilotRepository.existsByCopilotId(request.id)) { "作业id不存在" }
 
         // 使用 userIdOrIpAddress 进行评分（支持登录用户的 userId 或未登录用户的 IP 地址）
         val ratingChange = ratingService.rateCopilot(
@@ -578,7 +486,7 @@ class CopilotService(
         val (likeCountChange, dislikeCountChange) = ratingService.calcLikeChange(ratingChange)
 
         // 获取作业
-        val copilot = copilotKtormRepository.findNotDeletedCopilotId(request.id)
+        val copilot = copilotRepository.findNotDeletedCopilotId(request.id)
         checkNotNull(copilot) { "作业不存在" }
 
         // 计算评分相关
@@ -593,7 +501,7 @@ class CopilotService(
         copilot.dislikeCount = ratingCount - likeCount
         copilot.ratingLevel = (ratingLevel * 10).toInt()
         copilot.ratingRatio = ratingLevel
-        copilotKtormRepository.updateEntity(copilot)
+        copilotRepository.updateEntity(copilot)
 
         // 记录近期评分变化量前 100 的作业 id
         redisCache.incZSet(
@@ -637,10 +545,10 @@ class CopilotService(
 
     fun userEditCopilot(userId: Long?, copilotId: Long?, edit: CopilotEntity.() -> Unit): CopilotEntity {
         val cId = copilotId.requireNotNull { "copilotId 不能为空" }
-        val copilot = copilotKtormRepository.findNotDeletedCopilotId(cId).requireNotNull { "copilot 不存在" }
+        val copilot = copilotRepository.findNotDeletedCopilotId(cId).requireNotNull { "copilot 不存在" }
         require(copilot.uploaderId == userId) { "您没有权限修改" }
         copilot.apply(edit)
-        copilotKtormRepository.updateEntity(copilot)
+        copilotRepository.updateEntity(copilot)
         return copilot
     }
 

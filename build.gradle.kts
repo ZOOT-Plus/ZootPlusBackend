@@ -11,7 +11,7 @@ plugins {
     id("com.gorylenko.gradle-git-properties") version "3.0.2"
     id("io.freefair.aspectj.post-compile-weaving") version "9.5.0"
 
-    val ktVersion = "2.4.0"
+    val ktVersion = "2.4.10"
     kotlin("jvm") version ktVersion
     kotlin("plugin.spring") version ktVersion
     kotlin("plugin.serialization") version ktVersion
@@ -51,7 +51,6 @@ repositories {
 }
 
 dependencies {
-    val ktormVersion = "4.2.1"
     val hutoolVersion = "5.8.47"
     val mapstructVersion = "1.6.3"
 
@@ -59,6 +58,16 @@ dependencies {
 
     testImplementation("io.mockk:mockk:1.14.11")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+
+    // 平台 binary 按当前构建机自动选择（zonkyBinaryArtifact，见文件底部函数），不固定平台：
+    // 默认传递依赖会引入全部平台 jar，这里排除后只引入当前系统对应的一个
+    testImplementation("io.zonky.test:embedded-postgres:2.2.2") {
+        exclude(group = "io.zonky.test.postgres")
+    }
+    testImplementation(zonkyBinaryArtifact())
+
+    implementation("org.flywaydb:flyway-core")
+    implementation("org.flywaydb:flyway-database-postgresql")
 
     implementation("org.aspectj:aspectjrt:1.9.25.1")
     implementation("org.springframework:spring-aspects")
@@ -85,10 +94,17 @@ dependencies {
     // kotlin-logging
     implementation("io.github.oshai:kotlin-logging-jvm:8.0.4")
 
-    // ktorm connect with spring-jdbc
     implementation("org.springframework.boot:spring-boot-starter-jdbc")
-    implementation("org.ktorm:ktorm-core:$ktormVersion")
-    implementation("org.ktorm:ktorm-support-postgresql:$ktormVersion")
+    implementation(platform("org.jdbi:jdbi3-bom:3.54.0"))
+    implementation("org.jdbi:jdbi3-core")
+    implementation("org.jdbi:jdbi3-sqlobject")
+    implementation("org.jdbi:jdbi3-kotlin")
+    implementation("org.jdbi:jdbi3-kotlin-sqlobject")
+    implementation("org.jdbi:jdbi3-postgres")
+    implementation("org.jdbi:jdbi3-spring")
+    // 动态 SQL 解析结果由 jdbi3-caffeine-cache 缓存
+    implementation("org.jdbi:jdbi3-freemarker")
+    implementation("org.jdbi:jdbi3-caffeine-cache")
     implementation("org.postgresql:postgresql:42.7.13")
     // hutool 的邮箱工具类依赖
     implementation("com.sun.mail:javax.mail:1.6.2")
@@ -109,6 +125,7 @@ dependencies {
     implementation("com.networknt:json-schema-validator:1.5.8")
 
     implementation("com.belerweb:pinyin4j:2.5.1")
+    testImplementation(kotlin("test"))
 }
 
 val swaggerOutputDir = layout.buildDirectory.dir("docs")
@@ -125,22 +142,18 @@ val swaggerInputFile = swaggerOutputDir.get().file(swaggerOutputName)
 val clientDir = layout.buildDirectory.dir("clients")
 
 // Helper: register an OpenAPI code-gen task using the official plugin's GenerateTask
-fun TaskContainer.registerOpenApiGen(
-    name: String,
-    language: String,
-    configFilePath: String,
-    outputSubDir: String,
-) = register<GenerateTask>("generateSwaggerCode$name") {
-    group = "swagger"
-    description = "Generate $name client code from OpenAPI spec"
+fun TaskContainer.registerOpenApiGen(name: String, language: String, configFilePath: String, outputSubDir: String) =
+    register<GenerateTask>("generateSwaggerCode$name") {
+        group = "swagger"
+        description = "Generate $name client code from OpenAPI spec"
 
-    dependsOn("generateOpenApiDocs")
+        dependsOn("generateOpenApiDocs")
 
-    generatorName.set(language)
-    inputSpec.set(swaggerInputFile.asFile.absolutePath)
-    outputDir.set(clientDir.map { it.dir(outputSubDir) }.get().asFile.absolutePath)
-    configFile.set(file(configFilePath))
-}
+        generatorName.set(language)
+        inputSpec.set(swaggerInputFile.asFile.absolutePath)
+        outputDir.set(clientDir.map { it.dir(outputSubDir) }.get().asFile.absolutePath)
+        configFile.set(file(configFilePath))
+    }
 
 tasks {
     registerOpenApiGen("TsFetch", "typescript-fetch", "client-config/ts-fetch.json", "ts-fetch-client")
@@ -177,4 +190,27 @@ ktlint {
     reporters {
         reporter(ReporterType.PLAIN)
     }
+}
+
+/**
+ * 使用构建平台的pg二进制
+ *
+ * zonky 的二进制命名规律：`embedded-postgres-binaries-os-arch`
+ * os ∈ {linux, darwin, windows}，arch ∈ {amd64, arm64v8, i386, ppc64le}
+ */
+fun zonkyBinaryArtifact(): String {
+    val os = System.getProperty("os.name").lowercase()
+    val arch = System.getProperty("os.arch").lowercase()
+    val platform = when {
+        os.contains("linux") && (arch.contains("amd64") || arch.contains("x86_64")) -> "linux-amd64"
+        os.contains("linux") && (arch.contains("aarch64") || arch.contains("arm64")) -> "linux-arm64v8"
+        os.contains("linux") && arch.contains("86") -> "linux-i386"
+        os.contains("linux") && arch.contains("ppc64") -> "linux-ppc64le"
+        os.contains("mac") && (arch.contains("amd64") || arch.contains("x86_64")) -> "darwin-amd64"
+        os.contains("mac") && (arch.contains("aarch64") || arch.contains("arm64")) -> "darwin-arm64v8"
+        os.contains("win") && (arch.contains("amd64") || arch.contains("x86_64")) -> "windows-amd64"
+        os.contains("win") && arch.contains("86") -> "windows-i386"
+        else -> error("不支持的平台（zonky embedded-postgres）：os.name=${System.getProperty("os.name")}, os.arch=${System.getProperty("os.arch")}")
+    }
+    return "io.zonky.test.postgres:embedded-postgres-binaries-$platform:18.4.0"
 }

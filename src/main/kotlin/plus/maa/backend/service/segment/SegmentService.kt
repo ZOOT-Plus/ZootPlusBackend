@@ -1,10 +1,6 @@
 package plus.maa.backend.service.segment
 
 import io.github.oshai.kotlinlogging.KotlinLogging
-import org.ktorm.database.Database
-import org.ktorm.dsl.eq
-import org.ktorm.entity.filter
-import org.ktorm.entity.forEach
 import org.springframework.beans.factory.InitializingBean
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.ApplicationContext
@@ -14,14 +10,14 @@ import org.wltea.analyzer.cfg.DefaultConfig
 import org.wltea.analyzer.core.IKSegmenter
 import org.wltea.analyzer.dic.Dictionary
 import plus.maa.backend.config.external.MaaCopilotProperties
-import plus.maa.backend.repository.entity.copilots
+import plus.maa.backend.repository.ktorm.CopilotRepository
 import java.io.StringReader
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 
 @Service
 class SegmentService(
-    private val database: Database,
+    private val copilotRepository: CopilotRepository,
     private val ctx: ApplicationContext,
     private val properties: MaaCopilotProperties,
     // temporary fix for openapi generation
@@ -82,10 +78,9 @@ class SegmentService(
         val segUpdateAt = Instant.now()
         log.info { "Segments updating start at: $segUpdateAt" }
 
-        // small data, fetch all infzo
-        database.copilots.filter {
-            it.delete eq false
-        }.forEach {
+        // small data, fetch all info
+        // 全文检索索引构建只读 copilot_id/title/details 三列
+        copilotRepository.findAllNotDeletedIdTitleDetails().forEach {
             updateIndex(it.copilotId, it.title, it.details)
         }
 

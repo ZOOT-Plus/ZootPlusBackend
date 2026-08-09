@@ -18,7 +18,7 @@ data class ArkStage(
      */
     val stageId: String,
     /**
-     * 例: CB-EX8
+     * 例: CB-EX8。上游数据中活动关（如 autochess）可能为 null。
      */
     val code: String?,
 )

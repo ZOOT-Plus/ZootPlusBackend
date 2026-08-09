@@ -4,7 +4,6 @@ import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Pageable
 import org.springframework.stereotype.Service
 import plus.maa.backend.common.extensions.requireNotNull
-import plus.maa.backend.common.extensions.toMaaUser
 import plus.maa.backend.controller.request.comments.CommentsAddDTO
 import plus.maa.backend.controller.request.comments.CommentsQueriesDTO
 import plus.maa.backend.controller.request.comments.CommentsRatingDTO
@@ -16,8 +15,9 @@ import plus.maa.backend.controller.response.comments.SubCommentsInfo
 import plus.maa.backend.repository.entity.CommentsAreaEntity
 import plus.maa.backend.repository.entity.CopilotEntity
 import plus.maa.backend.repository.entity.MaaUser
-import plus.maa.backend.repository.ktorm.CommentsAreaKtormRepository
-import plus.maa.backend.repository.ktorm.CopilotKtormRepository
+import plus.maa.backend.repository.entity.toMaaUser
+import plus.maa.backend.repository.ktorm.CommentsAreaRepository
+import plus.maa.backend.repository.ktorm.CopilotRepository
 import plus.maa.backend.service.model.CommentStatus
 import plus.maa.backend.service.model.RatingType
 import plus.maa.backend.service.sensitiveword.SensitiveWordService
@@ -30,9 +30,9 @@ import plus.maa.backend.cache.InternalComposeCache as Cache
  */
 @Service
 class CommentsAreaService(
-    private val commentsAreaKtormRepository: CommentsAreaKtormRepository,
+    private val commentsAreaRepository: CommentsAreaRepository,
     private val ratingService: RatingService,
-    private val copilotKtormRepository: CopilotKtormRepository,
+    private val copilotRepository: CopilotRepository,
     private val userService: UserService,
     private val emailService: EmailService,
     private val sensitiveWordService: SensitiveWordService,
@@ -47,7 +47,7 @@ class CommentsAreaService(
     fun addComments(userId: Long, commentsAddDTO: CommentsAddDTO) {
         sensitiveWordService.validate(commentsAddDTO.message)
         val copilotId = commentsAddDTO.copilotId
-        val copilot = copilotKtormRepository.findByCopilotId(copilotId).requireNotNull { "作业不存在" }
+        val copilot = copilotRepository.findByCopilotId(copilotId).requireNotNull { "作业不存在" }
 
         if (copilot.commentStatus == CommentStatus.DISABLED && userId != copilot.uploaderId) {
             throw MaaResultException("评论区已被禁用")
@@ -63,21 +63,21 @@ class CommentsAreaService(
 
         notifyRelatedUser(userId, commentsAddDTO.message, copilot, parentComment)
 
-        val comment = CommentsAreaEntity {
-            this.copilotId = copilotId
-            this.uploaderId = userId
-            this.fromCommentId = parentComment?.id
-            this.mainCommentId = parentComment?.run { mainCommentId ?: id }
-            this.message = commentsAddDTO.message
-            this.notification = commentsAddDTO.notification
-            this.uploadTime = LocalDateTime.now()
-            this.likeCount = 0L
-            this.dislikeCount = 0L
-            this.topping = false
-            this.delete = false
-            this.deleteTime = null
-        }
-        commentsAreaKtormRepository.insertEntity(comment)
+        val comment = CommentsAreaEntity(
+            copilotId = copilotId,
+            uploaderId = userId,
+            fromCommentId = parentComment?.id,
+            mainCommentId = parentComment?.run { mainCommentId ?: id },
+            message = commentsAddDTO.message,
+            notification = commentsAddDTO.notification,
+            uploadTime = LocalDateTime.now(),
+            likeCount = 0L,
+            dislikeCount = 0L,
+            topping = false,
+            delete = false,
+            deleteTime = null,
+        )
+        commentsAreaRepository.insertEntity(comment)
         Cache.invalidateCommentCountById(copilotId)
     }
 
@@ -104,22 +104,17 @@ class CommentsAreaService(
     fun deleteComments(userId: Long, commentsId: Long) {
         val commentsArea = requireCommentsAreaById(commentsId)
         // 允许作者删除评论
-        val copilot = copilotKtormRepository.findByCopilotId(commentsArea.copilotId)
+        val copilot = copilotRepository.findByCopilotId(commentsArea.copilotId)
         require(userId == copilot?.uploaderId || userId == commentsArea.uploaderId) { "您无法删除不属于您的评论" }
 
         val now = LocalDateTime.now()
         commentsArea.delete = true
         commentsArea.deleteTime = now
-        // 删除所有回复
+        // 删除所有回复：主评论下子评论批量软删除（单条 UPDATE），避免逐行 updateEntity 的 N 次 UPDATE
         if (commentsArea.mainCommentId == null) {
-            val subComments = commentsAreaKtormRepository.findByMainCommentId(commentsId)
-            subComments.forEach { ca ->
-                ca.deleteTime = now
-                ca.delete = true
-                commentsAreaKtormRepository.updateEntity(ca)
-            }
+            commentsAreaRepository.softDeleteByMainCommentId(commentsId, now)
         }
-        commentsAreaKtormRepository.updateEntity(commentsArea)
+        commentsAreaRepository.updateEntity(commentsArea)
         Cache.invalidateCommentCountById(commentsArea.copilotId)
     }
 
@@ -145,7 +140,7 @@ class CommentsAreaService(
         commentsArea.likeCount = (commentsArea.likeCount + likeCountChange).coerceAtLeast(0)
         commentsArea.dislikeCount = (commentsArea.dislikeCount + dislikeCountChange).coerceAtLeast(0)
 
-        commentsAreaKtormRepository.updateEntity(commentsArea)
+        commentsAreaRepository.updateEntity(commentsArea)
     }
 
     /**
@@ -157,11 +152,11 @@ class CommentsAreaService(
     fun topping(userId: Long, commentsToppingDTO: CommentsToppingDTO) {
         val commentsArea = requireCommentsAreaById(commentsToppingDTO.commentId)
         // 只允许作者置顶评论
-        val copilot = copilotKtormRepository.findByCopilotId(commentsArea.copilotId)
+        val copilot = copilotRepository.findByCopilotId(commentsArea.copilotId)
         require(userId == copilot?.uploaderId) { "只有作者才能置顶评论" }
 
         commentsArea.topping = commentsToppingDTO.topping
-        commentsAreaKtormRepository.updateEntity(commentsArea)
+        commentsAreaRepository.updateEntity(commentsArea)
     }
 
     /**
@@ -175,17 +170,16 @@ class CommentsAreaService(
         val limit = if (request.limit > 0) request.limit else 10
         val pageable: Pageable = PageRequest.of(page, limit)
 
-        // 主评论 - 使用Ktorm查询
         val mainCommentsPage = if (request.justSeeId != null) {
             // 如果指定了评论ID，直接查询该评论
-            val comment = commentsAreaKtormRepository.findById(request.justSeeId)
+            val comment = commentsAreaRepository.findById(request.justSeeId)
             if (comment != null && !comment.delete && comment.copilotId == request.copilotId && comment.mainCommentId == null) {
                 org.springframework.data.domain.PageImpl(listOf(comment), pageable, 1)
             } else {
                 org.springframework.data.domain.PageImpl(emptyList<CommentsAreaEntity>(), pageable, 0)
             }
         } else {
-            commentsAreaKtormRepository.findByCopilotIdAndDeleteAndMainCommentIdExists(
+            commentsAreaRepository.findByCopilotIdAndDeleteAndMainCommentIdExists(
                 request.copilotId,
                 delete = false,
                 exists = false,
@@ -196,7 +190,7 @@ class CommentsAreaService(
         val mainCommentIds = mainCommentsPage.content.mapNotNull { it.id }
         // 获取子评论
         val subCommentsList = if (mainCommentIds.isNotEmpty()) {
-            commentsAreaKtormRepository.findByMainCommentId(mainCommentIds).onEach {
+            commentsAreaRepository.findByMainCommentId(mainCommentIds).onEach {
                 // 将已删除评论内容替换为空
                 if (it.delete) it.message = ""
             }
@@ -256,9 +250,9 @@ class CommentsAreaService(
         val commentsArea = requireCommentsAreaById(id)
         require(userId == commentsArea.uploaderId) { "您没有权限修改" }
         commentsArea.notification = status
-        commentsAreaKtormRepository.updateEntity(commentsArea)
+        commentsAreaRepository.updateEntity(commentsArea)
     }
 
     private fun requireCommentsAreaById(commentsId: Long, lazyMessage: () -> Any = { "评论不存在" }): CommentsAreaEntity =
-        commentsAreaKtormRepository.findById(commentsId)?.takeIf { !it.delete }.requireNotNull(lazyMessage)
+        commentsAreaRepository.findById(commentsId)?.takeIf { !it.delete }.requireNotNull(lazyMessage)
 }

@@ -30,7 +30,7 @@ import plus.maa.backend.repository.entity.gamedata.ArkTilePos
 import plus.maa.backend.repository.entity.gamedata.MaaArkStage
 import plus.maa.backend.repository.entity.github.GithubCommit
 import plus.maa.backend.repository.entity.github.GithubTree
-import plus.maa.backend.repository.ktorm.ArkLevelKtormRepository
+import plus.maa.backend.repository.ktorm.ArkLevelRepository
 import reactor.netty.http.client.HttpClient
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
@@ -48,7 +48,7 @@ class ArkLevelService(
     properties: MaaCopilotProperties,
     private val githubRepo: GithubRepository,
     private val redisCache: RedisCache,
-    private val arkLevelKtormRepo: ArkLevelKtormRepository,
+    private val arkLevelRepo: ArkLevelRepository,
     json: Json,
     private val arkLevelConverter: ArkLevelConverter,
     private val arkLevelEntityConverter: ArkLevelEntityConverter,
@@ -60,12 +60,16 @@ class ArkLevelService(
     private val log = KotlinLogging.logger { }
     private val github = properties.github
     private val webClient =
-        WebClient.builder().uriBuilderFactory(DefaultUriBuilderFactory().apply { encodingMode = DefaultUriBuilderFactory.EncodingMode.NONE })
+        WebClient.builder().uriBuilderFactory(
+            DefaultUriBuilderFactory().apply {
+                encodingMode = DefaultUriBuilderFactory.EncodingMode.NONE
+            },
+        )
             .clientConnector(
                 ReactorClientHttpConnector(
                     HttpClient.create().proxyWithSystemProperties()
-                        .responseTimeout(Duration.ofSeconds(30))
-                )
+                        .responseTimeout(Duration.ofSeconds(30)),
+                ),
             )
             .build()
     private val fetchDataHolder = lazySuspend { ArkGameDataHolder.fetch(webClient) }
@@ -74,18 +78,18 @@ class ArkLevelService(
     @get:Cacheable("arkLevelInfos")
     val arkLevelInfos: List<ArkLevelInfo>
         get() {
-            val entities = arkLevelKtormRepo.findAll()
+            val entities = arkLevelRepo.findAll()
             return arkLevelConverter.convert(entities)
         }
 
     @Cacheable("arkLevel")
     fun findByLevelIdFuzzy(levelId: String): ArkLevel? {
-        val entities = arkLevelKtormRepo.findByLevelIdFuzzy(levelId)
+        val entities = arkLevelRepo.findByLevelIdFuzzy(levelId)
         return entities.firstOrNull()?.let { arkLevelEntityConverter.convertFromEntity(it) }
     }
 
     fun queryLevelInfosByKeyword(keyword: String): List<ArkLevelInfo> {
-        val entities = arkLevelKtormRepo.queryLevelByKeyword(keyword)
+        val entities = arkLevelRepo.queryLevelByKeyword(keyword)
         return arkLevelConverter.convert(entities)
     }
 
@@ -104,7 +108,7 @@ class ArkLevelService(
                 logI { "已发现 ${trees.size} 份地图数据" }
 
                 // 根据 sha 筛选无需更新的地图
-                val shaSet = withContext(Dispatchers.IO) { arkLevelKtormRepo.findAllShaBy() }.map { it.sha }.toSet()
+                val shaSet = withContext(Dispatchers.IO) { arkLevelRepo.findAllShaBy() }.map { it.sha }.toSet()
                 val filtered = trees.filter { !shaSet.contains(it.sha) }
 
                 val parser = fetchLevelParser()
@@ -166,7 +170,7 @@ class ArkLevelService(
                 logI { entryInfo(tree.path, "未知类型，跳过") }
             } else {
                 val entity = arkLevelEntityConverter.convertToEntityWithAutoId(level)
-                withContext(Dispatchers.IO) { arkLevelKtormRepo.save(entity) }
+                withContext(Dispatchers.IO) { arkLevelRepo.save(entity) }
                 success.incrementAndGet()
                 logI { entryInfo(tree.path, "成功") }
             }
@@ -232,9 +236,9 @@ class ArkLevelService(
     ) {
         var pageable = Pageable.ofSize(batchSize)
         do {
-            val page = withContext(Dispatchers.IO) { arkLevelKtormRepo.findAllByCatOne(catOne.display, pageable) }
+            val page = withContext(Dispatchers.IO) { arkLevelRepo.findAllByCatOne(catOne.display, pageable) }
             page.forEach(block)
-            withContext(Dispatchers.IO) { arkLevelKtormRepo.saveAll(page.content) }
+            withContext(Dispatchers.IO) { arkLevelRepo.saveAll(page.content) }
             pageable = page.nextPageable()
         } while (page.hasNext())
     }

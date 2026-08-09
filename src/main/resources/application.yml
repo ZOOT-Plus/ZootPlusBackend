@@ -4,6 +4,8 @@ spring:
     url: jdbc:postgresql://100.84.158.57:5432/zoot
     username: root
     password: admin
+  flyway:
+    enabled: true
   profiles:
     active: dev
   servlet:

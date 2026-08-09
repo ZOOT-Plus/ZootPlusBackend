@@ -1,4 +1,7 @@
 HELP.md
+.pi
+
+# binary
 target/
 build/
 !.mvn/wrapper/maven-wrapper.jar

@@ -1,23 +1,12 @@
 package plus.maa.backend.task
 
 import io.github.oshai.kotlinlogging.KotlinLogging
-import org.ktorm.database.Database
-import org.ktorm.dsl.and
-import org.ktorm.dsl.batchUpdate
-import org.ktorm.dsl.eq
-import org.ktorm.dsl.inList
-import org.ktorm.entity.count
-import org.ktorm.entity.drop
-import org.ktorm.entity.filter
-import org.ktorm.entity.take
-import org.ktorm.entity.toList
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import plus.maa.backend.repository.entity.CopilotEntity
 import plus.maa.backend.repository.entity.CopilotSetEntity
-import plus.maa.backend.repository.entity.CopilotSets
-import plus.maa.backend.repository.entity.copilotSets
-import plus.maa.backend.repository.entity.copilots
+import plus.maa.backend.repository.ktorm.CopilotRepository
+import plus.maa.backend.repository.ktorm.CopilotSetRepository
 import java.time.LocalDateTime
 import java.time.temporal.ChronoUnit
 import kotlin.math.ln
@@ -26,7 +15,8 @@ import kotlin.math.min
 
 @Component
 class CopilotSetScoreRefreshTask(
-    private val database: Database,
+    private val copilotSetRepository: CopilotSetRepository,
+    private val copilotRepository: CopilotRepository,
 ) {
     private val log = KotlinLogging.logger {}
 
@@ -37,8 +27,8 @@ class CopilotSetScoreRefreshTask(
     fun refresh() {
         try {
             // 统计未删除的作业集总数
-            val total = database.copilotSets.filter { it.delete eq false }.count()
-            if (total == 0) {
+            val total = copilotSetRepository.countNotDeleted()
+            if (total == 0L) {
                 log.info { "没有需要更新的作业集" }
                 return
             }
@@ -46,13 +36,9 @@ class CopilotSetScoreRefreshTask(
             val pageSize = 1000
             var offset = 0
 
-            while (offset < total) {
+            while (offset.toLong() < total) {
                 try {
-                    val copilotSets = database.copilotSets
-                        .filter { it.delete eq false }
-                        .drop(offset)
-                        .take(pageSize)
-                        .toList()
+                    val copilotSets = copilotSetRepository.findNotDeletedPage(offset, pageSize)
 
                     if (copilotSets.isEmpty()) break
 
@@ -62,9 +48,7 @@ class CopilotSetScoreRefreshTask(
                             val copilots = if (s.copilotIds.isEmpty()) {
                                 emptyList()
                             } else {
-                                database.copilots
-                                    .filter { (it.copilotId inList s.copilotIds) and (it.delete eq false) }
-                                    .toList()
+                                copilotRepository.findByIdsAndNotDeleted(s.copilotIds)
                             }
 
                             scoreMap[s.id] = score(s, copilots)
@@ -75,16 +59,7 @@ class CopilotSetScoreRefreshTask(
 
                     // 批量更新热度分数
                     if (scoreMap.isNotEmpty()) {
-                        database.batchUpdate(CopilotSets) {
-                            scoreMap.forEach { (id, newScore) ->
-                                item {
-                                    set(it.hotScore, newScore)
-                                    where {
-                                        it.id eq id
-                                    }
-                                }
-                            }
-                        }
+                        copilotSetRepository.batchUpdateHotScores(scoreMap)
                     }
                 } catch (e: Exception) {
                     log.error(e) { "处理第 ${offset / pageSize + 1} 页时出错" }

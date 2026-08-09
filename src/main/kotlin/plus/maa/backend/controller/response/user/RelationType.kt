@@ -4,5 +4,9 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 enum class RelationType {
-    SELF, NONE, FOLLOWING, FOLLOWED_BY, MUTUAL
+    SELF,
+    NONE,
+    FOLLOWING,
+    FOLLOWED_BY,
+    MUTUAL,
 }

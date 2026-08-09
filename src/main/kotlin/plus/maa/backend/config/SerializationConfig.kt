@@ -19,7 +19,5 @@ class SerializationConfig : WebMvcConfigurer {
     }
 
     @Bean
-    fun kotlinSerializationHttpMessageConverter(json: Json) =
-        KotlinSerializationJsonHttpMessageConverter(json)
-
+    fun kotlinSerializationHttpMessageConverter(json: Json) = KotlinSerializationJsonHttpMessageConverter(json)
 }

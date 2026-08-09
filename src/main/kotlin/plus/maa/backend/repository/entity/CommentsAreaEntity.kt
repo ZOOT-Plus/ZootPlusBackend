@@ -1,47 +1,24 @@
 package plus.maa.backend.repository.entity
 
-import org.ktorm.database.Database
-import org.ktorm.entity.Entity
-import org.ktorm.entity.sequenceOf
-import org.ktorm.schema.Table
-import org.ktorm.schema.boolean
-import org.ktorm.schema.datetime
-import org.ktorm.schema.long
-import org.ktorm.schema.text
 import java.time.LocalDateTime
 
-interface CommentsAreaEntity : Entity<CommentsAreaEntity> {
-    var id: Long
-    var copilotId: Long
-    var fromCommentId: Long?
-    var uploaderId: Long
-    var message: String
-    var likeCount: Long
-    var dislikeCount: Long
-    var uploadTime: LocalDateTime
-    var topping: Boolean
-    var delete: Boolean
-    var deleteTime: LocalDateTime?
-    var mainCommentId: Long?
-    var notification: Boolean
-
-    companion object : Entity.Factory<CommentsAreaEntity>()
-}
-
-object CommentsAreas : Table<CommentsAreaEntity>("comments_area") {
-    val id = long("id").primaryKey().bindTo { it.id }
-    val copilotId = long("copilot_id").bindTo { it.copilotId }
-    val fromCommentId = long("from_comment_id").bindTo { it.fromCommentId }
-    val uploaderId = long("uploader_id").bindTo { it.uploaderId }
-    val message = text("message").bindTo { it.message }
-    val likeCount = long("like_count").bindTo { it.likeCount }
-    val dislikeCount = long("dislike_count").bindTo { it.dislikeCount }
-    val uploadTime = datetime("upload_time").bindTo { it.uploadTime }
-    val topping = boolean("topping").bindTo { it.topping }
-    val delete = boolean("delete").bindTo { it.delete }
-    val deleteTime = datetime("delete_time").bindTo { it.deleteTime }
-    val mainCommentId = long("main_comment_id").bindTo { it.mainCommentId }
-    val notification = boolean("notification").bindTo { it.notification }
-}
-
-val Database.commentsAreas get() = sequenceOf(CommentsAreas)
+/**
+ * comments_area 表实体。
+ *
+ * - 属性保持可变（var）：服务层"读出 → 改字段 → updateEntity"依赖原地修改。
+ */
+data class CommentsAreaEntity(
+    var id: Long = 0,
+    var copilotId: Long = 0,
+    var fromCommentId: Long? = null,
+    var uploaderId: Long = 0,
+    var message: String = "",
+    var likeCount: Long = 0,
+    var dislikeCount: Long = 0,
+    var uploadTime: LocalDateTime = LocalDateTime.now(),
+    var topping: Boolean = false,
+    var delete: Boolean = false,
+    var deleteTime: LocalDateTime? = null,
+    var mainCommentId: Long? = null,
+    var notification: Boolean = false,
+)
