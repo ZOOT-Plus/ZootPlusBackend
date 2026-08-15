@@ -163,7 +163,7 @@ class CopilotSetRepositoryTest : TestDbSupport() {
         val offset = (page - 1) * limit
         val (sets, total) = repository.querySets(
             userId = userId,
-            onlyFollowing = onlyFollowing,
+            onlyFollowing = onlyFollowing && userId != null,
             creatorId = targetCreatorId,
             keyword = kw,
             copilotIds = requiredIds,
@@ -521,6 +521,18 @@ class CopilotSetRepositoryTest : TestDbSupport() {
         val (all, allTotal) = querySets(userId = 1L)
         assertEquals(3, all.size)
         assertEquals(3L, allTotal)
+    }
+
+    @Test
+    fun querySets_anonymousIgnoresOnlyFollowing() {
+        val pub = repository.insertEntity(newEntity(name = "pub-set", creatorId = 10L))
+        repository.insertEntity(newEntity(name = "priv-set", creatorId = 10L, status = CopilotSetStatus.PRIVATE))
+        insertFollow(1L, 10L)
+
+        val (sets, total) = querySets(userId = null, onlyFollowing = true)
+
+        assertEquals(listOf(pub.id), sets.map { it.id }, "匿名用户不支持关注功能，onlyFollowing 应被忽略")
+        assertEquals(1L, total, "匿名仍只应看到 PUBLIC")
     }
 
     @Test

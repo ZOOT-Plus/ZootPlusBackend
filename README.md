@@ -14,7 +14,7 @@
 ## 本地开发指南
 
 1. 你需要一个有 Valkey (或Redis) 和 PostgreSQL 的环境，如果你是windows用户，可以从 [redis-windows](https://github.com/redis-windows/redis-windows/releases) 中下载Redis使用。 您也可以直接使用 [](./dev-docker/docker-compose.yml) 来启动 docker 服务
-2. 通过 [](docker/init.sql) 初始化数据库
+2. 无需手动初始化数据库：应用首次启动时 Flyway 会根据 `src/main/resources/db/migration` 自动建表
 3. 使用你喜欢的 IDE 导入此项目，复制 [](/src/main/resources/application-template.yml) 到同目录下，命名为 `application-dev.yml`，修改数据库配置以符合你自己配置的环境。
 4. 下载安装 JDK 25 或者以上版本的 JDK， 可以考虑从 [zuluJDK](https://www.azul.com/downloads/?version=java-25-lts&package=jdk) 或者 [libreicaJDK](https://bell-sw.com/pages/downloads/#jdk-25-lts) 下载安装。 Jetbrains Idea 可以使用自带的 JDK 管理器进行下载
 5. 运行 `./gradlew bootRun`, windows 环境为 `./gradlew.bat bootRun`
@@ -28,7 +28,7 @@
 
 ### 已有库表的老项目接入
 
-如果你的数据库已经通过 `docker/init.sql` 等方式建好全部表，**首次启动接入 Flyway 前必须先建立 baseline**，否则 Flyway 会在「非空 schema 且无 `flyway_schema_history` 表」时直接报错，导致应用启动失败。
+如果你的数据库已经建好全部表（例如旧版本中使用过已移除的 `docker/init.sql`），**首次启动接入 Flyway 前必须先建立 baseline**，否则 Flyway 会在「非空 schema 且无 `flyway_schema_history` 表」时直接报错，导致应用启动失败。
 
 操作方法：在 `application.yml`（或你的 `application-prod.yml` / `application-dev.yml`）中打开以下两项注释：
 

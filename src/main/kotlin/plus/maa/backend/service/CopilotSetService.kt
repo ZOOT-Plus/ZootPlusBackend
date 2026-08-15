@@ -145,7 +145,7 @@ class CopilotSetService(
 
         val (copilotSets, totalCount) = copilotSetRepository.querySets(
             userId = userId,
-            onlyFollowing = req.onlyFollowing,
+            onlyFollowing = req.onlyFollowing && userId != null,
             creatorId = targetCreatorId,
             keyword = keyword,
             copilotIds = requiredIds,

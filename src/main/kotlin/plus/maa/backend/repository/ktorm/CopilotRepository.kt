@@ -1,10 +1,11 @@
 package plus.maa.backend.repository.ktorm
 
+import com.github.benmanes.caffeine.cache.Cache
+import com.github.benmanes.caffeine.cache.Caffeine
 import org.jdbi.v3.core.Jdbi
 import org.jdbi.v3.core.statement.Query
 import org.jdbi.v3.core.statement.Update
 import org.jdbi.v3.sqlobject.customizer.AllowUnusedBindings
-import org.jdbi.v3.sqlobject.customizer.Bind
 import org.jdbi.v3.sqlobject.kotlin.BindKotlin
 import org.jdbi.v3.sqlobject.statement.GetGeneratedKeys
 import org.jdbi.v3.sqlobject.statement.SqlBatch
@@ -14,8 +15,11 @@ import plus.maa.backend.repository.entity.CopilotEntity
 import plus.maa.backend.repository.entity.OperatorEntity
 import plus.maa.backend.service.model.CopilotSetStatus
 import plus.maa.backend.service.model.CopilotType
+import java.time.Duration
 import java.time.LocalDateTime
-import java.util.concurrent.ConcurrentHashMap
+
+private const val COPILOT_SNAPSHOT_MAX_SIZE = 20_000L
+private val COPILOT_SNAPSHOT_TTL: Duration = Duration.ofDays(14)
 
 /**
  * 模块「copilot」的 Jdbi repository。
@@ -30,17 +34,11 @@ class CopilotRepository(private val jdbi: Jdbi) {
 
     private val dao: CopilotDao = jdbi.onDemand(CopilotDao::class.java)
 
-    /**
-     * `updateEntity` 的 flushChanges 语义快照：copilotId → 实体上次"落库/从库读回"时的状态。
-     *
-     * 打点时机：所有实体读回方法（find* / query* / getNotDeletedQuery 等）、`insertEntity`（insert 后）、`save`（写后）。
-     * `updateEntity` 将实体当前状态与快照逐列比对，只 SET 变化的列（与 Ktorm flushChanges 一致）。
-     * 未在快照中的实体（非本 repository 读出的）退化为全列 UPDATE。
-     *
-     * 注意：快照按 id 而非对象同一性存储，同一 copilot 的两次并发读会互相覆盖快照；
-     * 由于快照内容都是"该行某时刻的读回状态"，对本项目的使用模式（读后立刻改再 update）行为与基线一致。
-     */
-    private val snapshots = ConcurrentHashMap<Long, CopilotEntity>()
+    /** updateEntity 脏检查快照；缓存未命中时退化为全列 UPDATE。 */
+    private val snapshots: Cache<Long, CopilotEntity> = Caffeine.newBuilder()
+        .maximumSize(COPILOT_SNAPSHOT_MAX_SIZE)
+        .expireAfterWrite(COPILOT_SNAPSHOT_TTL)
+        .build()
 
     // ------------------------------------------------------------------
     // 实体读回
@@ -126,7 +124,7 @@ class CopilotRepository(private val jdbi: Jdbi) {
         } else {
             dao.insertWithId(copilot)
         }
-        snapshots[copilot.copilotId] = copilot.copy()
+        remember(copilot)
         return copilot
     }
 
@@ -135,7 +133,7 @@ class CopilotRepository(private val jdbi: Jdbi) {
      * 无快照（非本 repository 读出的实体）退化为全列 UPDATE；无变化列时跳过 SQL（0 行更新）。
      */
     fun updateEntity(copilot: CopilotEntity): CopilotEntity {
-        val snapshot = snapshots[copilot.copilotId]
+        val snapshot = snapshots.getIfPresent(copilot.copilotId)
         if (snapshot == null) {
             dao.updateAll(copilot)
         } else {
@@ -157,7 +155,7 @@ class CopilotRepository(private val jdbi: Jdbi) {
                 }
             }
         }
-        snapshots[copilot.copilotId] = copilot.copy()
+        remember(copilot)
         return copilot
     }
 
@@ -167,7 +165,7 @@ class CopilotRepository(private val jdbi: Jdbi) {
             insertEntity(entity)
         } else {
             dao.updateAll(entity)
-            snapshots[entity.copilotId] = entity.copy()
+            remember(entity)
             entity
         }
     }
@@ -215,7 +213,9 @@ class CopilotRepository(private val jdbi: Jdbi) {
                 .bind(0, copilotId)
                 .execute()
             if (names.isNotEmpty()) {
-                dao.batchInsertOperators(names.map { OperatorEntity(copilotId = copilotId, name = it) })
+                // onDemand DAO 不会加入当前事务，必须用 attach
+                h.attach(CopilotDao::class.java)
+                    .batchInsertOperators(names.map { OperatorEntity(copilotId = copilotId, name = it) })
             }
         }
     }
@@ -286,7 +286,7 @@ class CopilotRepository(private val jdbi: Jdbi) {
                 .bindAll(args)
                 .mapTo(Long::class.java)
                 .one()
-            rows.forEach { snapshots[it.copilotId] = it.copy() }
+            rows.forEach { remember(it) }
             rows to total
         }
     }
@@ -336,14 +336,18 @@ class CopilotRepository(private val jdbi: Jdbi) {
             .mapTo(CopilotEntity::class.java)
             .findOne()
             .orElse(null)
-    }?.also { snapshots[it.copilotId] = it.copy() }
+    }?.also { remember(it) }
 
     private fun queryEntities(sql: String, vararg args: Any?): List<CopilotEntity> = jdbi.withHandle<List<CopilotEntity>, Exception> { h ->
         h.createQuery(sql)
             .bindAll(args.toList())
             .mapTo(CopilotEntity::class.java)
             .list()
-    }.also { rows -> rows.forEach { snapshots[it.copilotId] = it.copy() } }
+    }.also { rows -> rows.forEach { remember(it) } }
+
+    private fun remember(copilot: CopilotEntity) {
+        snapshots.put(copilot.copilotId, copilot.copy())
+    }
 
     private fun Query.bindAll(args: List<Any?>): Query {
         args.forEachIndexed { index, value -> bind(index, value) }

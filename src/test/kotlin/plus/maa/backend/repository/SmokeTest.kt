@@ -9,7 +9,7 @@ import java.time.Instant
 import java.time.temporal.ChronoUnit
 
 /**
- * 测试基础设施冒烟测试：验证 embedded postgres 启动、init.sql 建表、
+ * 测试基础设施冒烟测试：验证 embedded postgres 启动、Flyway V1__init.sql 建表、
  * jdbi 读写链路与 truncateAll 数据隔离均可用。
  */
 class SmokeTest : TestDbSupport() {

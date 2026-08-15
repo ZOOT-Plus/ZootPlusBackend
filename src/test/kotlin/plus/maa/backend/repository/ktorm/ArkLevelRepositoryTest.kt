@@ -19,7 +19,7 @@ import java.time.LocalDateTime
  * findAllShaBy / findAllByCatOne / saveAll / count（继承）。
  *
  * 未覆盖点与基线记录：
- * - 唯一约束冲突：ark_level 表（docker/init.sql）无任何唯一约束（level_id/stage_id/name 均为普通索引），
+ * - 唯一约束冲突：ark_level 表（V1__init.sql）无任何唯一约束（level_id/stage_id/name 均为普通索引），
  *   该通用场景不适用；基线行为 = 重复 level_id 可共存（见 insertDuplicateLevelIdAllowed）。
  * - findByLevelIdFuzzy 的 keyword 含 `%`/`_` 时按 LIKE 通配符解释，无转义（见
  *   findByLevelIdFuzzyWildcardBaseline）。
@@ -489,7 +489,7 @@ class ArkLevelRepositoryTest : TestDbSupport() {
 
     @Test
     fun insertDuplicateLevelIdAllowed() {
-        // 基线记录：ark_level 无唯一约束（init.sql 中 level_id/stage_id/name 索引均非 unique），
+        // 基线记录：ark_level 无唯一约束（V1__init.sql 中 level_id/stage_id/name 索引均非 unique），
         // "唯一约束冲突" 场景对本模块不适用；重复 level_id 可共存。
         repository.insertEntity(newLevel(levelId = "dup", name = "第一行"))
         repository.insertEntity(newLevel(levelId = "dup", name = "第二行"))
