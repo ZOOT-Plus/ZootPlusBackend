@@ -186,11 +186,12 @@ class UserController(
     @GetMapping("/batch")
     @Operation(summary = "批量获取用户信息")
     @ApiResponse(description = "用户信息列表")
-    fun getBatchUserInfo(
-        @RequestParam ids: List<Long>,
-            ): MaaResult<List<MaaUserInfo>> {
+    fun getBatchUserInfo(@RequestParam ids: List<Long>): MaaResult<List<MaaUserInfo>> {
         if (ids.size > 50) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "单次查询用户量不能超过50")
+        }
+        if (ids.isEmpty()) {
+            return success(emptyList())
         }
         val currentUserId = helper.obtainUserId()?.toLongOrNull()
         return success(userService.getBatchUserInfos(ids, currentUserId))

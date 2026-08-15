@@ -14,7 +14,7 @@ import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import plus.maa.backend.config.external.MaaCopilotProperties
 import plus.maa.backend.repository.entity.CopilotEntity
-import plus.maa.backend.repository.ktorm.CopilotKtormRepository
+import plus.maa.backend.repository.ktorm.CopilotRepository
 import plus.maa.backend.service.level.ArkLevelService
 import plus.maa.backend.service.model.CopilotSetStatus
 import java.io.File
@@ -32,7 +32,7 @@ private val log = KotlinLogging.logger { }
 @Component
 class CopilotBackupTask(
     private val config: MaaCopilotProperties,
-    private val copilotKtormRepository: CopilotKtormRepository,
+    private val copilotRepository: CopilotRepository,
     private val levelService: ArkLevelService,
 ) {
     private lateinit var git: Git
@@ -88,7 +88,7 @@ class CopilotBackupTask(
 
         val monthAgo = LocalDateTime.now().minusDays(60L)
         val baseDirectory = git.repository.workTree
-        val copilots = copilotKtormRepository.findAllByUploadTimeAfterOrDeleteTimeAfter(monthAgo, monthAgo)
+        val copilots = copilotRepository.findAllByUploadTimeAfterOrDeleteTimeAfter(monthAgo, monthAgo)
         copilots.forEach { copilot: CopilotEntity ->
             val level = levelService.findByLevelIdFuzzy(copilot.stageName) ?: return@forEach
             // 暂时使用 copilotId 作为文件名

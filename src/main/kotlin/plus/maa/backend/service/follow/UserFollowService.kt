@@ -3,44 +3,43 @@ package plus.maa.backend.service.follow
 import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.Pageable
 import org.springframework.stereotype.Service
-import plus.maa.backend.common.extensions.paginate
-import plus.maa.backend.common.extensions.toMaaUserInfo
 import plus.maa.backend.controller.response.user.FollowStatusInfo
 import plus.maa.backend.controller.response.user.MaaUserInfo
 import plus.maa.backend.controller.response.user.RelationType
-import plus.maa.backend.repository.ktorm.UserKtormRepository
+import plus.maa.backend.repository.entity.toMaaUserInfo
+import plus.maa.backend.repository.ktorm.UserRepository
 import java.time.LocalDateTime
 import java.time.ZoneId
 
 @Service
 class UserFollowService(
-    private val userKtormRepository: UserKtormRepository,
+    private val userRepository: UserRepository,
 ) {
 
     fun follow(userId: Long, followUserId: Long) {
         check(userId != followUserId) {
             "不能关注自己哦～"
         }
-        val followUser = userKtormRepository.findById(followUserId)
+        val followUser = userRepository.findById(followUserId)
         check(followUser != null && followUser.status > 0) {
             "关注的用户不存在哦～"
         }
-        userKtormRepository.follow(userId, followUserId)
+        userRepository.follow(userId, followUserId)
     }
 
     fun unfollow(userId: Long, followUserId: Long) {
-        userKtormRepository.unfollow(userId, followUserId)
+        userRepository.unfollow(userId, followUserId)
     }
 
     fun getFollowingList(userId: Long, pageable: Pageable): PageImpl<MaaUserInfo> {
-        val res = userKtormRepository.follows(userId).paginate(pageable)
-        val users = res.toList()
+        val res = userRepository.follows(userId, pageable)
+        val users = res.content
         val targetIds = users.map { it.userId }
         // 查询关注时间
-        val updatedAtMap = userKtormRepository.getFollowUpdatedAtMap(userId, targetIds)
-        val specialFollowIds = userKtormRepository.getSpecialFollowedTargetIds(userId, targetIds)
+        val updatedAtMap = userRepository.getFollowUpdatedAtMap(userId, targetIds)
+        val specialFollowIds = userRepository.getSpecialFollowedTargetIds(userId, targetIds)
         // 查询哪些目标也关注了我（用于判断 MUTUAL）
-        val mutualIds = userKtormRepository.getFollowerTargetIds(targetIds, userId)
+        val mutualIds = userRepository.getFollowerTargetIds(targetIds, userId)
         val enriched = users.map { user ->
             val info = user.toMaaUserInfo()
             val relation = if (user.userId in mutualIds) RelationType.MUTUAL else RelationType.FOLLOWING
@@ -55,14 +54,14 @@ class UserFollowService(
     }
 
     fun getFansList(userId: Long, pageable: Pageable): PageImpl<MaaUserInfo> {
-        val res = userKtormRepository.fans(userId).paginate(pageable)
-        val users = res.toList()
+        val res = userRepository.fans(userId, pageable)
+        val users = res.content
         val fanIds = users.map { it.userId }
         // 批量查询粉丝关注我的时间
-        val fanUpdatedAtMap = userKtormRepository.getFansUpdatedAtMap(fanIds, userId)
-        val specialFollowIds = userKtormRepository.getSpecialFollowedTargetIds(userId, fanIds)
+        val fanUpdatedAtMap = userRepository.getFansUpdatedAtMap(fanIds, userId)
+        val specialFollowIds = userRepository.getSpecialFollowedTargetIds(userId, fanIds)
         // 查询我关注了哪些粉丝（用于判断 MUTUAL）
-        val iFollowBackIds = userKtormRepository.getFollowedTargetIds(userId, fanIds)
+        val iFollowBackIds = userRepository.getFollowedTargetIds(userId, fanIds)
         val enriched = users.map { user ->
             val info = user.toMaaUserInfo()
             val relation = if (user.userId in iFollowBackIds) RelationType.MUTUAL else RelationType.FOLLOWED_BY
@@ -77,27 +76,27 @@ class UserFollowService(
     }
 
     fun setSpecialFollow(userId: Long, followUserId: Long, status: Boolean) {
-        if (!status && userKtormRepository.findFollow(userId, followUserId) == null) {
+        if (!status && userRepository.findFollow(userId, followUserId) == null) {
             return
         }
         check(userId != followUserId) {
             "不能特关自己哦～"
         }
         if (status) {
-            val followUser = userKtormRepository.findById(followUserId)
+            val followUser = userRepository.findById(followUserId)
             check(followUser != null && followUser.status > 0) {
                 "关注的用户不存在哦～"
             }
         }
-        val updated = userKtormRepository.setSpecialFollow(userId, followUserId, status)
+        val updated = userRepository.setSpecialFollow(userId, followUserId, status)
         check(updated || !status) {
             "请先关注该用户哦～"
         }
     }
 
     fun getStatus(userId: Long, followUserId: Long): FollowStatusInfo {
-        val follow = userKtormRepository.findFollow(userId, followUserId)
-        val theyFollowMe = userKtormRepository.isFollowing(followUserId, userId)
+        val follow = userRepository.findFollow(userId, followUserId)
+        val theyFollowMe = userRepository.isFollowing(followUserId, userId)
         val relation = when {
             userId == followUserId -> RelationType.SELF
             follow != null && theyFollowMe -> RelationType.MUTUAL

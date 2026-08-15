@@ -40,7 +40,6 @@ class RedisCache(
     @RedisCacheInternalApi
     final val expire = expire.seconds
 
-
     private val supportUnlink = AtomicBoolean(true)
 
     /*
@@ -75,7 +74,6 @@ class RedisCache(
         }
     }
 
-
     /**
      * 当缓存不存在时，则 set
      *
@@ -88,7 +86,6 @@ class RedisCache(
         val encoded = getJson(value) ?: return false
         return setCacheStringIfAbsent(key, encoded, timeout)
     }
-
 
     @RedisCacheInternalApi
     fun setCacheStringIfAbsent(key: String, jsonString: String, timeout: Duration): Boolean {
@@ -315,14 +312,13 @@ class RedisCache(
     }
 
     @RedisCacheInternalApi
-    final inline fun <reified T> getJson(value: T): String? =
-        try {
-            defaultJson.encodeToString(value)
-        } catch (e: SerializationException) {
-            log.debug { e.message }
-            null
-        } catch (e: IllegalArgumentException) {
-            log.debug { e.message }
-            null
-        }
+    final inline fun <reified T> getJson(value: T): String? = try {
+        defaultJson.encodeToString(value)
+    } catch (e: SerializationException) {
+        log.debug { e.message }
+        null
+    } catch (e: IllegalArgumentException) {
+        log.debug { e.message }
+        null
+    }
 }

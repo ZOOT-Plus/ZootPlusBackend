@@ -9,6 +9,10 @@ spring:
     url: jdbc:postgresql://localhost:5432/zoot
     username: root
     password: admin
+  flyway:
+    # 已有库表的老项目首次接入 Flyway 时需打开以下两项，建立 baseline 后 V1__init.sql 会被跳过，不会破坏现有结构
+    # baseline-on-migrate: true
+    # baseline-version: 1
 
 maa-copilot:
   backup:
@@ -82,11 +86,11 @@ springdoc:
   packages-to-scan: plus.maa.backend
 
 # 调试设置，禁用邮箱发送，改为本地控制台打印验证码
-#debug:
+# debug:
 #  email:
 #    no-send: true
 
-# 如果需要打印SQL，则启用下面日志
-#logging:
-#  level:
-#    org.ktorm: debug
+# 如果需要打印SQL，启用下面日志
+# logging:
+#   level:
+#     org.jdbi.sql: debug

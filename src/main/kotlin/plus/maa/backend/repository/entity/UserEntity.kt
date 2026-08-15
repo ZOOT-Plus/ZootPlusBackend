@@ -1,44 +1,29 @@
 package plus.maa.backend.repository.entity
 
-import org.ktorm.database.Database
-import org.ktorm.entity.Entity
-import org.ktorm.entity.sequenceOf
-import org.ktorm.schema.Table
-import org.ktorm.schema.int
-import org.ktorm.schema.long
-import org.ktorm.schema.timestamp
-import org.ktorm.schema.varchar
 import java.time.Instant
 
-interface UserEntity : Entity<UserEntity> {
-    var userId: Long
-    var userName: String
-    var email: String
-    var password: String
-    var status: Int
-    var pwdUpdateTime: Instant
-    var followingCount: Int
-    var fansCount: Int
-
-    companion object : Entity.Factory<UserEntity>() {
-        val UNKNOWN = UserEntity {
-            userId = 0L
-            userName = "未知用户"
-            email = "unknown@unkown.unkown"
-            password = "unknown"
-        }
+/**
+ * 用户实体。
+ *
+ * 注意：`userId == 0L` 表示新实体（INSERT 时省略 user_id，走自增回填，回填为原地修改）；
+ * `userId != 0L` 时 INSERT 显式携带 user_id。
+ */
+data class UserEntity(
+    var userId: Long = 0,
+    var userName: String = "",
+    var email: String = "",
+    var password: String = "",
+    var status: Int = 0,
+    var pwdUpdateTime: Instant = Instant.MIN,
+    var followingCount: Int = 0,
+    var fansCount: Int = 0,
+) {
+    companion object {
+        val UNKNOWN = UserEntity(
+            userId = 0L,
+            userName = "未知用户",
+            email = "unknown@unknown.unknown",
+            password = "unknown",
+        )
     }
 }
-
-object Users : Table<UserEntity>("user") {
-    val userId = long("user_id").primaryKey().bindTo { it.userId }
-    val userName = varchar("user_name").bindTo { it.userName }
-    val email = varchar("email").bindTo { it.email }
-    val password = varchar("password").bindTo { it.password }
-    val status = int("status").bindTo { it.status }
-    val pwdUpdateTime = timestamp("pwd_update_time").bindTo { it.pwdUpdateTime }
-    val followingCount = int("following_count").bindTo { it.followingCount }
-    val fansCount = int("fans_count").bindTo { it.fansCount }
-}
-
-val Database.users get() = this.sequenceOf(Users)

@@ -8,19 +8,20 @@ import plus.maa.backend.repository.entity.ArkLevelEntity
 class ArkLevelEntityConverter {
 
     fun convertToEntityWithAutoId(arkLevel: ArkLevel): ArkLevelEntity {
-        return ArkLevelEntity {
-            this.levelId = arkLevel.levelId
-            this.stageId = arkLevel.stageId
-            this.sha = arkLevel.sha
-            this.catOne = arkLevel.catOne
-            this.catTwo = arkLevel.catTwo
-            this.catThree = arkLevel.catThree
-            this.name = arkLevel.name
-            this.width = arkLevel.width
-            this.height = arkLevel.height
-            this.isOpen = arkLevel.isOpen
-            this.closeTime = arkLevel.closeTime
-        }
+        // id 不设置（默认 0），由 repository insert 回填自增主键
+        return ArkLevelEntity(
+            levelId = arkLevel.levelId,
+            stageId = arkLevel.stageId,
+            sha = arkLevel.sha,
+            catOne = arkLevel.catOne,
+            catTwo = arkLevel.catTwo,
+            catThree = arkLevel.catThree,
+            name = arkLevel.name,
+            width = arkLevel.width,
+            height = arkLevel.height,
+            isOpen = arkLevel.isOpen,
+            closeTime = arkLevel.closeTime,
+        )
     }
 
     fun convertFromEntity(entity: ArkLevelEntity): ArkLevel {

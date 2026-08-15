@@ -3,8 +3,8 @@ package plus.maa.backend.controller.request.copilot
 import com.fasterxml.jackson.annotation.JsonSubTypes
 import com.fasterxml.jackson.annotation.JsonTypeInfo
 import jakarta.validation.constraints.NotBlank
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 import plus.maa.backend.config.validation.JsonSchemaMatch
 import plus.maa.backend.config.validation.JsonSchemaMatchValidator
 import plus.maa.backend.service.model.CopilotSetStatus

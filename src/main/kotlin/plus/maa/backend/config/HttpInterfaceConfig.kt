@@ -14,8 +14,8 @@ import org.springframework.web.reactive.function.client.ExchangeStrategies
 import org.springframework.web.reactive.function.client.WebClient
 import org.springframework.web.reactive.function.client.support.WebClientAdapter
 import org.springframework.web.service.invoker.HttpServiceProxyFactory
-import plus.maa.backend.common.serialization.defaultJson
 import org.springframework.web.service.invoker.createClient
+import plus.maa.backend.common.serialization.defaultJson
 import plus.maa.backend.repository.GithubRepository
 import reactor.netty.http.client.HttpClient
 import java.time.Duration
@@ -47,8 +47,8 @@ class HttpInterfaceConfig {
             .clientConnector(
                 ReactorClientHttpConnector(
                     HttpClient.create().proxyWithSystemProperties()
-                        .responseTimeout(Duration.ofSeconds(30))
-                )
+                        .responseTimeout(Duration.ofSeconds(30)),
+                ),
             )
             .defaultHeaders { headers: HttpHeaders ->
                 headers.add("Accept", "application/vnd.github+json")

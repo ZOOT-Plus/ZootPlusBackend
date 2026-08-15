@@ -1,4 +1,3 @@
--- 用户表
 create table if not exists "user"
 (
   user_id         bigserial primary key,
@@ -13,18 +12,16 @@ create table if not exists "user"
 create index if not exists idx_user_user_name on "user" (user_name);
 create unique index if not exists idx_user_user_email on "user" (email);
 
--- 用户关注表
 create table if not exists "user_follow"
 (
   user_id        bigint,
-  follow_user_id bigint                    not null,
-  special_follow boolean     default false not null,
-  updated_at     timestamp(3)              not null,
+  follow_user_id bigint                not null,
+  special_follow boolean default false not null,
+  updated_at     timestamp(3)          not null,
   primary key (user_id, follow_user_id)
 );
 create index if not exists idx_user_follow_special_author on user_follow (follow_user_id, special_follow);
 
--- 站内信表
 create table if not exists site_message
 (
   id          bigserial primary key,
@@ -51,11 +48,10 @@ comment on column site_message.created_at is '创建时间';
 create index if not exists idx_site_message_receiver_created on site_message (receiver_id, created_at desc);
 create index if not exists idx_site_message_receiver_read on site_message (receiver_id, read_at);
 
--- 作业表
 create table if not exists copilot
 (
   copilot_id        bigserial primary key,
-  type              text             default 'PRTS' :: text not null,
+  type              text             default 'PRTS' :: text    not null,
   stage_name        text                                       not null,
   uploader_id       bigint                                     not null,
   views             bigint                                     not null,
@@ -71,7 +67,7 @@ create table if not exists copilot
   content           text                                       not null,
   status            text             default 'PUBLIC' :: text  not null,
   comment_status    text             default 'ENABLED' :: text not null,
-  delete            boolean,
+  delete            boolean          default false,
   delete_time       timestamp(3),
   notification      boolean
 );
@@ -83,17 +79,16 @@ comment on column copilot.views is '查看次数';
 comment on column copilot.rating_level is '评级';
 comment on column copilot.rating_ratio is '评级比率 十分之一代表半星';
 comment on column copilot.hot_score is '热度';
-comment on column copilot.title is '指定干员@Cascade(["copilot_id"], ["copilot_id"])var opers: List<OperatorEntity>?,文档字段，用于搜索，提取到Copilot类型上';
+comment on column copilot.title is '指定干员，文档字段，用于搜索，提取到Copilot类型上';
 comment on column copilot.first_upload_time is '首次上传时间';
 comment on column copilot.upload_time is '更新时间';
 comment on column copilot.content is '原始数据';
-comment on column copilot.delete is '作业状态，后端默认设置为公开以兼容历史逻辑[plus.maa.backend.service.model.CopilotSetStatus]';
+comment on column copilot.delete is '作业删除状态';
 create index if not exists idx_copilot_stage_name on copilot (stage_name);
 create index if not exists idx_copilot_type on copilot (type);
 create index if not exists idx_copilot_view on copilot (views);
 create index if not exists idx_hot_score on copilot (hot_score);
 
--- 作业干员表
 create table if not exists copilot_operator
 (
   id         bigserial primary key,
@@ -103,7 +98,6 @@ create table if not exists copilot_operator
 create index if not exists idx_operator_copilot_id on copilot_operator (copilot_id);
 create index if not exists idx_operator_name on copilot_operator (name);
 
--- 评论区表
 create table if not exists comments_area
 (
   id              bigserial primary key,
@@ -137,7 +131,6 @@ create index if not exists idx_comments_copilot_id on comments_area (copilot_id)
 create index if not exists idx_comments_uploader_id on comments_area (uploader_id);
 create index if not exists idx_comments_main_comment_id on comments_area (main_comment_id);
 
--- 评分表
 create table if not exists rating
 (
   id        bigserial primary key,
@@ -157,12 +150,11 @@ comment on column rating.rate_time is '评级时间';
 create unique index if not exists idx_rating_unique on rating (type, key, user_id);
 create index if not exists idx_rating_user_id on rating (user_id);
 
--- 作业集表
 create table if not exists copilot_set
 (
   id          bigserial primary key,
   name        text                                      not null,
-  description text             default 0                not null,
+  description text             default ''               not null,
   copilot_ids jsonb                                     not null,
   views       bigint           default 0                not null,
   hot_score   double precision default 0                not null,
@@ -185,7 +177,6 @@ create index if not exists idx_copilot_set_creator_id on copilot_set (creator_id
 create index if not exists idx_copilot_set_status on copilot_set (status);
 create index if not exists idx_copilot_set_copilot_ids on copilot_set using gin (copilot_ids jsonb_path_ops);
 
--- 关卡表
 create table if not exists ark_level
 (
   id         bigserial primary key,
@@ -218,21 +209,3 @@ create index if not exists idx_ark_level_level_id on ark_level (level_id);
 create index if not exists idx_ark_level_stage_id on ark_level (stage_id);
 create index if not exists idx_ark_level_name on ark_level (name);
 create index if not exists idx_ark_level_is_open on ark_level (is_open);
-
--- 设置自增序列的起始值
--- user 表的 user_id 从 1 开始
-ALTER SEQUENCE IF EXISTS user_user_id_seq RESTART WITH 1;
--- copilot 表的 copilot_id 从 1 开始 (需要调整，迁移时修改即可)
-ALTER SEQUENCE IF EXISTS copilot_copilot_id_seq RESTART WITH 1;
--- copilot_operator 表的 id 从 1 开始
-ALTER SEQUENCE IF EXISTS copilot_operator_id_seq RESTART WITH 1;
--- rating 表的 id 从 1 开始
-ALTER SEQUENCE IF EXISTS rating_id_seq RESTART WITH 1;
--- comments_area 表的 id 从 1 开始
-ALTER SEQUENCE IF EXISTS comments_area_id_seq RESTART WITH 1;
--- copilot_set 表的 id 从 1 开始
-ALTER SEQUENCE IF EXISTS copilot_set_id_seq RESTART WITH 1;
--- ark_level 表的 id 从 1 开始
-ALTER SEQUENCE IF EXISTS ark_level_id_seq RESTART WITH 1;
--- site_message 表的 id 从 1 开始
-ALTER SEQUENCE IF EXISTS site_message_id_seq RESTART WITH 1;

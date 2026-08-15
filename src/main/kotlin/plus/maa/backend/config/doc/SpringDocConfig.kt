@@ -158,6 +158,5 @@ class SpringDocConfig(
             schema.anyOf?.forEach { renamePropertiesToSnakeCase(it) }
             schema.allOf?.forEach { renamePropertiesToSnakeCase(it) }
         }
-
     }
 }

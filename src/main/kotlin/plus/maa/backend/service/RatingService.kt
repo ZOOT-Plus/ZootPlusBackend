@@ -3,12 +3,12 @@ package plus.maa.backend.service
 import org.springframework.stereotype.Service
 import plus.maa.backend.repository.entity.Rating
 import plus.maa.backend.repository.entity.RatingEntity
-import plus.maa.backend.repository.ktorm.RatingKtormRepository
+import plus.maa.backend.repository.ktorm.RatingRepository
 import plus.maa.backend.service.model.RatingType
 import java.time.LocalDateTime
 
 @Service
-class RatingService(private val ratingKtormRepository: RatingKtormRepository) {
+class RatingService(private val ratingRepository: RatingRepository) {
     /**
      * Update rating of target object
      *
@@ -19,38 +19,39 @@ class RatingService(private val ratingKtormRepository: RatingKtormRepository) {
      * @return A pair, previous one and the target one.
      */
     fun rate(keyType: Rating.KeyType, key: String, raterId: String, ratingType: RatingType): Pair<RatingEntity, RatingEntity> {
-        val rating = ratingKtormRepository.findByTypeAndKeyAndUserId(
+        // 先查命中路径（常见：用户已有评分记录），未命中再走原子“插入或获取”。
+        // insertOrGet 内部用 INSERT ... ON CONFLICT DO NOTHING + 重读，消除并发首次评分时
+        // find-then-insert 竞态导致后到者撞 idx_rating_unique 抛 DuplicateKeyException（未捕获 → 500）。
+        val rating = ratingRepository.findByTypeAndKeyAndUserId(
             keyType,
             key,
             raterId,
-        ) ?: run {
-            val newRating = RatingEntity {
-                this.type = keyType
-                this.key = key
-                this.userId = raterId
-                this.rating = RatingType.NONE
-                this.rateTime = LocalDateTime.now()
-            }
-            ratingKtormRepository.insertEntity(newRating)
-            newRating
-        }
+        ) ?: ratingRepository.insertOrGet(
+            RatingEntity(
+                type = keyType,
+                key = key,
+                userId = raterId,
+                rating = RatingType.NONE,
+                rateTime = LocalDateTime.now(),
+            ),
+        )
 
         if (ratingType == rating.rating) return rating to rating
 
         val prevRating = rating.rating
         rating.rating = ratingType
         rating.rateTime = LocalDateTime.now()
-        ratingKtormRepository.updateEntity(rating)
+        ratingRepository.updateEntity(rating)
 
         // 创建一个表示之前状态的对象
-        val prevEntity = RatingEntity {
-            this.id = rating.id
-            this.type = rating.type
-            this.key = rating.key
-            this.userId = rating.userId
-            this.rating = prevRating
-            this.rateTime = rating.rateTime
-        }
+        val prevEntity = RatingEntity(
+            id = rating.id,
+            type = rating.type,
+            key = rating.key,
+            userId = rating.userId,
+            rating = prevRating,
+            rateTime = rating.rateTime,
+        )
 
         return prevEntity to rating
     }
@@ -74,5 +75,5 @@ class RatingService(private val ratingKtormRepository: RatingKtormRepository) {
         rate(Rating.KeyType.COPILOT, copilotId.toString(), raterId, ratingType)
 
     fun findPersonalRatingOfCopilot(raterId: String, copilotId: Long): RatingEntity? =
-        ratingKtormRepository.findByTypeAndKeyAndUserId(Rating.KeyType.COPILOT, copilotId.toString(), raterId)
+        ratingRepository.findByTypeAndKeyAndUserId(Rating.KeyType.COPILOT, copilotId.toString(), raterId)
 }

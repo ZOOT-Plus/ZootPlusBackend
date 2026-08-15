@@ -6,9 +6,9 @@ import org.springframework.security.core.userdetails.UserDetails
 import org.springframework.security.core.userdetails.UserDetailsService
 import org.springframework.security.core.userdetails.UsernameNotFoundException
 import org.springframework.stereotype.Service
-import plus.maa.backend.common.extensions.toMaaUser
 import plus.maa.backend.repository.entity.MaaUser
-import plus.maa.backend.repository.ktorm.UserKtormRepository
+import plus.maa.backend.repository.entity.toMaaUser
+import plus.maa.backend.repository.ktorm.UserRepository
 import plus.maa.backend.service.model.LoginUser
 
 /**
@@ -16,7 +16,7 @@ import plus.maa.backend.service.model.LoginUser
  */
 @Service
 class UserDetailServiceImpl(
-    private val userRepository: UserKtormRepository,
+    private val userRepository: UserRepository,
 ) : UserDetailsService {
     /**
      * 查询用户信息
