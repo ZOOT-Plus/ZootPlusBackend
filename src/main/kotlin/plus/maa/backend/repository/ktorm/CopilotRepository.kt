@@ -21,6 +21,13 @@ import java.time.LocalDateTime
 private const val COPILOT_SNAPSHOT_MAX_SIZE = 20_000L
 private val COPILOT_SNAPSHOT_TTL: Duration = Duration.ofDays(14)
 
+/** zhparser 文本搜索配置名，沿用 abcfy2/zhparser 镜像自带的 chinese_zh。 */
+private const val CHINESE_ZH_FTS_CONFIG = "chinese_zh"
+
+/** 作业标题/描述的 zhparser tsvector 表达式，查询条件必须与索引表达式完全一致。 */
+private const val COPILOT_DOCUMENT_TSV_EXPR =
+    "to_tsvector('chinese_zh', coalesce(title, '') || ' ' || coalesce(details, ''))"
+
 /**
  * 模块「copilot」的 Jdbi repository。
  *
@@ -92,15 +99,6 @@ class CopilotRepository(private val jdbi: Jdbi) {
             "SELECT * FROM copilot WHERE copilot_id IN (${placeholders(ids)}) AND \"delete\" = FALSE",
             *ids.toTypedArray(),
         )
-    }
-
-    /**
-     * SegmentService 索引构建用：只读 copilot_id/title/details 三列。
-     */
-    fun findAllNotDeletedIdTitleDetails(): List<CopilotIndexRow> = jdbi.withHandle<List<CopilotIndexRow>, Exception> { h ->
-        h.createQuery("SELECT copilot_id, title, details FROM copilot WHERE \"delete\" = FALSE")
-            .mapTo(CopilotIndexRow::class.java)
-            .list()
     }
 
     fun findAllByUploadTimeAfterOrDeleteTimeAfter(uploadTimeAfter: LocalDateTime, deleteTimeAfter: LocalDateTime): List<CopilotEntity> =
@@ -222,8 +220,8 @@ class CopilotRepository(private val jdbi: Jdbi) {
 
     /**
      * CopilotService.query 的复合条件分页查询（delete=false 基条件 +
-     * 可选 type/status/stage_name LIKE/stage_name IN/uploader_id IN/copilot_id IN/
-     * 关注子查询/干员包含排除子查询 + 三键两向排序 + LIMIT/OFFSET + COUNT）。
+     * 可选 type/status/document FTS/stage_name LIKE/stage_name IN/uploader_id IN/
+     * copilot_id IN/关注子查询/干员包含排除子查询 + 三键两向排序 + LIMIT/OFFSET + COUNT）。
      *
      * 返回 (当前页实体, 过滤后总数)。空集合条件跳过。
      * `stageNameKeyword` 原样绑定（不带 % 通配符，基线 like 语义）。
@@ -258,6 +256,12 @@ class CopilotRepository(private val jdbi: Jdbi) {
         req.status?.let { add("status = ?", it.name) }
         req.stageNameKeyword?.let { add("stage_name LIKE ?", it) }
         req.stageNames?.let { addIn("stage_name", it) }
+        req.documentKeyword?.takeIf { it.isNotBlank() }?.let {
+            add(
+                "$COPILOT_DOCUMENT_TSV_EXPR @@ websearch_to_tsquery('$CHINESE_ZH_FTS_CONFIG', ?)",
+                it,
+            )
+        }
         req.inUserIds?.let { addIn("uploader_id", it) }
         req.inCopilotIds?.let { addIn("copilot_id", it) }
         req.onlyFollowingUserId?.let {
@@ -370,6 +374,8 @@ data class CopilotQueryRequest(
     /** 原样绑定（不带 % 通配符，基线 like 语义） */
     val stageNameKeyword: String? = null,
     val stageNames: List<String>? = null,
+    /** 非空时使用 zhparser 对 title/details 做全文检索（AND 语义由 websearch_to_tsquery 提供） */
+    val documentKeyword: String? = null,
     val inUserIds: List<Long>? = null,
     val inCopilotIds: List<Long>? = null,
     /** 非 null 时附加 uploader_id IN (SELECT follow_user_id FROM user_follow WHERE user_id = ?) */
@@ -381,15 +387,6 @@ data class CopilotQueryRequest(
     val desc: Boolean = true,
     val page: Int = 1,
     val limit: Int = 10,
-)
-
-/**
- * SegmentService 索引构建投影（只读 copilot_id/title/details 三列）。
- */
-data class CopilotIndexRow(
-    val copilotId: Long,
-    val title: String,
-    val details: String?,
 )
 
 /** batchUpdateHotScores 的单行载荷。 */

@@ -25,14 +25,12 @@ import java.time.LocalDateTime
  *      1. `CopilotService.upload` / `update` 的干员批量写入与先删后插（insertOperators/replaceOperators）；
  *      2. `CopilotScoreRefreshTask.refresh` 的 batchUpdateHotScores + RatingRepository 聚合
  *         （热度公式 getHotScore 与 arkLevelService 关卡冷却为纯逻辑，不覆盖）；
- *      3. `SegmentService.afterPropertiesSet` 的全量扫描（findAllNotDeletedIdTitleDetails；
- *         IK 分词与内存 INDEX 为纯内存逻辑，不覆盖）；
- *      4. `CopilotService.query` 的复合条件分页查询（queryCopilots()，含 onlyFollowing /
+ *      3. `CopilotService.query` 的复合条件分页查询（queryCopilots()，含 onlyFollowing /
  *         includeOps / notIncludeOps 子查询、三键两向排序、分页与总数）。
  *
  * 未覆盖点及原因：
- *  - `CopilotService.upload/query/edit` 完整流程：依赖 RedisCache、SensitiveWordService、SegmentService、
- *    SiteMessageService、ArkLevelService、InternalComposeCache 等 12 个服务，无法脱离 Spring 上下文构造，
+ *  - `CopilotService.upload/query/edit` 完整流程：依赖 RedisCache、SensitiveWordService、
+ *    SiteMessageService、ArkLevelService、InternalComposeCache 等服务，无法脱离 Spring 上下文构造，
  *    只测到 repository 层 + DB 原生查询点；
  *  - `CopilotScoreRefreshTask.refreshHotScores/refreshTop100HotScores`：Redis 热度榜与分页循环未覆盖
  *    （redisCache 依赖），其 DB 部分（batchUpdateHotScores + countByTypeKeyInRatingAfter + countNotDeleted/findNotDeletedPage）已覆盖；
@@ -130,7 +128,7 @@ class CopilotRepositoryTest : TestDbSupport() {
     }
 
     /**
-     * `CopilotService.query` 的 DB 部分（docs/migration-analysis.md §3 #2，收敛到
+     * `CopilotService.query` 的 DB 部分（见 docs/zhparser-migration.md，收敛到
      * CopilotRepository.queryCopilots）。返回 (当前页实体列表, 过滤后总数)。
      */
     private fun queryCopilots(
@@ -138,6 +136,7 @@ class CopilotRepositoryTest : TestDbSupport() {
         status: CopilotSetStatus? = null,
         stageNameKeyword: String? = null,
         stageNames: List<String>? = null,
+        documentKeyword: String? = null,
         inUserIds: List<Long>? = null,
         inCopilotIds: List<Long>? = null,
         onlyFollowing: Boolean = false,
@@ -154,6 +153,7 @@ class CopilotRepositoryTest : TestDbSupport() {
             status = status,
             stageNameKeyword = stageNameKeyword,
             stageNames = stageNames,
+            documentKeyword = documentKeyword,
             inUserIds = inUserIds,
             inCopilotIds = inCopilotIds,
             onlyFollowingUserId = if (onlyFollowing) userId else null,
@@ -652,28 +652,7 @@ class CopilotRepositoryTest : TestDbSupport() {
         )
     }
 
-    // ---------- 原生查询点 3：SegmentService.afterPropertiesSet 的全量扫描（§3 #9） ----------
-
-    @Test
-    fun `segmentService index scan only reads not-deleted copilots with title and details`() {
-        val keep1 = repo.insertEntity(newCopilot(title = "t1", details = "d1"))
-        val keep2 = repo.insertEntity(newCopilot(title = "t2", details = null))
-        val deleted = repo.insertEntity(newCopilot(title = "t3", details = "d3"))
-        deleted.delete = true
-        repo.updateEntity(deleted)
-
-        // 对应 SegmentService.afterPropertiesSet（索引构建只读三列）
-        val scanned = repo.findAllNotDeletedIdTitleDetails()
-
-        val byId = scanned.associateBy { it.copilotId }
-        assertEquals(setOf(keep1.copilotId, keep2.copilotId), byId.keys, "delete=true 的作业不进索引")
-        assertEquals("t1", byId[keep1.copilotId]!!.title)
-        assertEquals("d1", byId[keep1.copilotId]!!.details)
-        assertEquals("t2", byId[keep2.copilotId]!!.title)
-        assertNull(byId[keep2.copilotId]!!.details, "details 可空，分词时按 null 处理")
-    }
-
-    // ---------- 原生查询点 4：CopilotService.query 复合条件分页查询（§3 #2） ----------
+    // ---------- 原生查询点 3：CopilotService.query 复合条件分页查询（§3 #2） ----------
 
     /** 构造 query 测试数据集：返回 title → id 映射。 */
     private fun seedQueryData(): Map<String, Long> {

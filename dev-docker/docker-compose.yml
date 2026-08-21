@@ -7,10 +7,12 @@ services:
       - "6379:6379"
     restart: always
   postgres:
-    image: postgres:alpine
+    image: docker.io/abcfy2/zhparser:18-alpine
     container_name: postgres
+    command: ["postgres", "-c", "zhparser.extra_dicts=arknights.txt"]
     volumes:
       - ../.data:/var/lib/postgresql
+      - ../src/main/resources/arknights.txt:/usr/local/share/postgresql/tsearch_data/arknights.txt:ro
     ports:
       - "5432:5432"
     restart: always
