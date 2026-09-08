@@ -1,0 +1,59 @@
+kotlin
+  s_2f0a3b549bae34::t_21575ac02bb798 1-286
+.github/workflows/openapi.yml
+  s_2f0a3b549bae34::t_cdb5469b62f8e0 54,67
+build-support/module.yaml
+  s_2f0a3b549bae34::t_bf1b32acb53c22 1-3
+src/main/kotlin/plus/maa/backend/common/utils/converter/ArkLevelConverter.kt
+  s_2f0a3b549bae34::t_7c17b2ee87590c 3,11-12
+Dockerfile
+  s_2f0a3b549bae34::t_feea325524ac1c 3
+src/main/kotlin/plus/maa/backend/MainApplication.kt
+  s_2f0a3b549bae34::t_af7782f1d49de7 11-13
+kotlin.bat
+  s_2f0a3b549bae34::t_21575ac02bb798 1-264
+build-support/src/ktlint.kt
+  s_2f0a3b549bae34::t_d6a80501b4219c 1-15,17-21,23,25-26,28-30,32-36
+  s_2f0a3b549bae34::t_56b0dae19aa0d1 16,31
+  s_2f0a3b549bae34::t_b68d0e3d16cfe4 27
+  s_2f0a3b549bae34::t_1e35c1ed68c10f 22,24
+module.yaml
+  s_2f0a3b549bae34::t_0cd57f6107bc45 43-44
+  s_2f0a3b549bae34::t_f82984e0a1e845 50-51
+  s_2f0a3b549bae34::t_734b69be28013e 1-25,30-42,45-49,52-81
+  s_2f0a3b549bae34::t_9c2a7d17471e65 26-29
+src/main/kotlin/plus/maa/backend/common/utils/converter/CopilotSetConverter.kt
+  s_2f0a3b549bae34::t_a79ec4dd44badb 3,12-13
+project.yaml
+  s_2f0a3b549bae34::t_50bf5d13eb2f4f 1-6
+build-support/src/gitProperties.kt
+  s_2f0a3b549bae34::t_2a6dcb3e3aae7c 18,21,23
+  s_2f0a3b549bae34::t_13291fe189063a 1-17,19-20,22,24-49
+build-support/src/openapi.kt
+  s_2f0a3b549bae34::t_d8ba1300e2e81b 86-87
+  s_2f0a3b549bae34::t_8ea5825fd80aa2 1-13,15-85,88-110
+  s_2f0a3b549bae34::t_42f236460a0495 14
+build-support/plugin.yaml
+  s_2f0a3b549bae34::t_84af98a0f87fc8 1-41
+README.md
+  s_2f0a3b549bae34::t_586d82d0e64f8d 11,21,43-45
+  s_2f0a3b549bae34::t_6cdd6a7abe34db 47
+.github/workflows/release.yaml
+  s_2f0a3b549bae34::t_039f55589c41b1 50-51,53-54,60,75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "257b05dc51d478c6f1fda953649197422c29fb71",
+  "prompts": {},
+  "sessions": {
+    "s_2f0a3b549bae34": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a07eb9-43a8-71cb-8077-18d3324502a6",
+        "model": "deepseek-v4-pro"
+      },
+      "human_author": "dragove <dragove@qq.com>"
+    }
+  }
+}
