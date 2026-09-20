@@ -12,9 +12,13 @@ END
 $$;
 
 -- 复用 abcfy2/zhparser 镜像自带的 chinese_zh 配置；已有库 init 脚本不会执行，
--- 所以这里做一次幂等创建，并确保映射与镜像默认保持一致。
--- 领域词库 arknights.txt 中所有词的词性已统一为 n，
--- 因此只需映射 n/v/a/i/e/l/t，不映射自定义词默认的 x。
+-- 所以这里做一次幂等创建。
+-- 映射集合在镜像默认的 a/e/i/l/n/t/v 之外补上 d(副词)/r(代词)/m(数词)：
+-- zhparser 共声明 26 种 token type，未映射的类型会被 to_tsvector 静默丢弃，
+-- 而作业标题/描述里「非常」「这个」「二」这类成分很常见——尤其 m，
+-- 缺了它「精二」只会剩下「精」。
+-- 领域词库 arknights.txt 的词性已统一为 n，所以自定义词不依赖 x；
+-- 助词(u)/标点(w)/介词(p)/连词(c) 等纯功能词保持不映射，避免无意义词元进入索引。
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'zhparser') THEN
@@ -28,10 +32,10 @@ BEGIN
         END IF;
 
         ALTER TEXT SEARCH CONFIGURATION chinese_zh
-            DROP MAPPING IF EXISTS FOR n, v, a, i, e, l, t;
+            DROP MAPPING IF EXISTS FOR n, v, a, i, e, l, t, d, r, m;
 
         ALTER TEXT SEARCH CONFIGURATION chinese_zh
-            ADD MAPPING FOR n, v, a, i, e, l, t WITH simple;
+            ADD MAPPING FOR n, v, a, i, e, l, t, d, r, m WITH simple;
     END IF;
 END
 $$;
