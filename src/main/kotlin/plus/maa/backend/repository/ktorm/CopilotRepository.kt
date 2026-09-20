@@ -256,9 +256,12 @@ class CopilotRepository(private val jdbi: Jdbi) {
         req.status?.let { add("status = ?", it.name) }
         req.stageNameKeyword?.let { add("stage_name LIKE ?", it) }
         req.stageNames?.let { addIn("stage_name", it) }
+        // 用 plainto_tsquery 而不是 websearch_to_tsquery：无空格中文会被 zhparser 切成多个词，
+        // websearch 会把它们拼成 <-> 短语（「阿米娅挂机」匹配不到「阿米娅精二挂机」），
+        // 并会把 or/-/引号解释成运算符；plainto 把分词结果按 AND 组合，词出现在任意位置即命中。
         req.documentKeyword?.takeIf { it.isNotBlank() }?.let {
             add(
-                "$COPILOT_DOCUMENT_TSV_EXPR @@ websearch_to_tsquery('$CHINESE_ZH_FTS_CONFIG', ?)",
+                "$COPILOT_DOCUMENT_TSV_EXPR @@ plainto_tsquery('$CHINESE_ZH_FTS_CONFIG', ?)",
                 it,
             )
         }
@@ -374,7 +377,10 @@ data class CopilotQueryRequest(
     /** 原样绑定（不带 % 通配符，基线 like 语义） */
     val stageNameKeyword: String? = null,
     val stageNames: List<String>? = null,
-    /** 非空时使用 zhparser 对 title/details 做全文检索（AND 语义由 websearch_to_tsquery 提供） */
+    /**
+     * 非空时使用 zhparser 对 title/details 做全文检索：`plainto_tsquery` 把分词结果按 AND 组合
+     * （词出现在任意位置即命中），输入中的 `or`/`-`/引号等不解释为运算符。
+     */
     val documentKeyword: String? = null,
     val inUserIds: List<Long>? = null,
     val inCopilotIds: List<Long>? = null,

@@ -1,7 +1,7 @@
 # zhparser 全文搜索迁移手册
 
 本文档用于将作业搜索从「IK 分词 + 应用内存倒排索引」迁移到「PostgreSQL 18 + zhparser」。
-应用侧代码已改为直接通过 `websearch_to_tsquery('chinese_zh', ...)` 查询 `copilot.title/details`，
+应用侧代码已改为直接通过 `plainto_tsquery('chinese_zh', ...)` 查询 `copilot.title/details`，
 不再需要 `SegmentService`、`arknights.txt` 应用内词典加载和启动全量索引构建。
 
 ## 1. 目标架构
@@ -11,7 +11,8 @@
 - 文本搜索配置：`chinese_zh`（parser = zhparser，复用镜像默认配置，不存在时由 V2 创建）
 - 领域词典：`arknights.txt`，每个词统一标记为名词 `n`
 - 索引：`copilot.title` + `copilot.details` 的表达式 GIN 索引
-- 查询：`websearch_to_tsquery`，空格分隔词为 AND 语义
+- 查询：`plainto_tsquery`，分词后所有词按 AND 匹配（任意位置、与顺序无关）；
+  输入中的 `or` / `-` / 引号等**不会**被解释成运算符，而是当作普通文本分词
 
 ## 2. 本次代码变更摘要
 
@@ -19,7 +20,7 @@
 - 删除 `SegmentService` / `SegmentInfo` / `MaaCopilotProperties.segmentInfo`；
 - 上传、编辑、查询不再维护内存分词索引；
 - `CopilotRepository.queryCopilots` 新增 `documentKeyword` 条件，使用：
-  `to_tsvector('chinese_zh', coalesce(title,'') || ' ' || coalesce(details,'')) @@ websearch_to_tsquery('chinese_zh', ?)`；
+  `to_tsvector('chinese_zh', coalesce(title,'') || ' ' || coalesce(details,'')) @@ plainto_tsquery('chinese_zh', ?)`；
 - 新增 Flyway `V2__zhparser_document_search.sql`；
 - `arknights.txt` 每行追加 `1.0 1.0 n`，作为 zhparser 自定义词典使用；
 - `docker/docker-compose.yml`、`dev-docker/docker-compose.yml` 的 PG 镜像更新为 zhparser 镜像并挂载词典。
@@ -32,7 +33,10 @@
    `CREATE EXTENSION IF NOT EXISTS zhparser`；
    官方 PG 镜像 / 本地无 zhparser 的环境会自动跳过，不影响启动。
 2. 扩展存在时，创建 `chinese_zh`，并映射 token 类型
-   `n, v, a, i, e, l, t`。词典词性已统一为 `n`，无需映射 `x`。
+   `n, v, a, i, e, l, t, d, r, m`（后三个 d 副词 / r 代词 / m 数词是相对镜像默认新增的）。
+   zhparser 共声明 26 种 token type，未映射的类型会被 `to_tsvector` 静默丢弃：
+   缺 `m` 时「精二」只剩「精」；助词(u)/标点(w)/介词(p)/连词(c) 等纯功能词则有意不映射。
+   词典词性已统一为 `n`，无需映射 `x`。
 3. 创建表达式 GIN 索引：
 
 ```sql
@@ -52,8 +56,16 @@ CREATE INDEX IF NOT EXISTS idx_copilot_document_tsv
 > 注意：Flyway 每个版本只执行一次。若某个库先在无 zhparser 的环境跑过 V2（迁移被跳过），
 > 之后再切换到 zhparser 镜像，需要手动执行本文 4.5/4.6 中的建配置和建索引 SQL，
 > 或新增一个迁移版本补建。线上正式迁移时应在**切换 PG 镜像之后、首次启动新版应用之前**完成环境准备。
+>
+> 映射类型会直接影响 `to_tsvector` 的结果，而 PG 不会自动重建表达式索引：
+> 只有在索引尚未创建时（即 V2 首次生效前）调整映射才是安全的；
+> 若某个库已经建好 `idx_copilot_document_tsv` 之后又改了映射，
+> 必须 `REINDEX INDEX idx_copilot_document_tsv;`，否则已有行仍是按旧映射算出来的词元。
 
 ## 4. 线上数据库迁移步骤
+
+> 本节命令针对**线上自维护的 compose**：服务名 `database`、数据目录 `./data/`。
+> 仓库内的 `docker/docker-compose.yml` 服务名是 `db`、挂载路径也不同，两者不是同一个文件，请勿混用。
 
 线上 compose 目前为：
 
@@ -196,12 +208,28 @@ SELECT indexname FROM pg_indexes WHERE indexname = 'idx_copilot_document_tsv';
 -- 词典词性应为 n
 SELECT * FROM ts_debug('chinese_zh', '阿米娅 危机合约 龙门币');
 
+-- 映射集应为 a,d,e,i,l,m,n,r,t,v（含 V2 新增的 d 副词 / r 代词 / m 数词）
+SELECT t.alias, m.maptokentype
+FROM pg_ts_config_map m
+JOIN pg_ts_config c ON c.oid = m.mapcfg
+JOIN pg_ts_parser p ON p.prsname = 'zhparser'
+JOIN LATERAL ts_token_type(p.oid) t ON t.tokid = m.maptokentype
+WHERE c.cfgname = 'chinese_zh'
+ORDER BY t.alias;
+
+-- 语义确认（二）：补上 m 映射后「精二」应切成 '精' & '二'，而不是只剩 '精'
+SELECT plainto_tsquery('chinese_zh', '精二');
+
 -- 搜索验证
 SELECT copilot_id, title
 FROM copilot
 WHERE "delete" = FALSE
   AND to_tsvector('chinese_zh', coalesce(title,'') || ' ' || coalesce(details,''))
-      @@ websearch_to_tsquery('chinese_zh', '阿米娅');
+      @@ plainto_tsquery('chinese_zh', '阿米娅');
+
+-- 语义确认：应输出 '阿米娅' & '挂机'（AND，而非 <-> 短语），
+-- 即关键字「阿米娅挂机」能命中标题为「阿米娅精二挂机」的作业
+SELECT plainto_tsquery('chinese_zh', '阿米娅挂机');
 
 -- 确认使用索引
 SET enable_seqscan = off;
@@ -210,7 +238,7 @@ SELECT copilot_id
 FROM copilot
 WHERE "delete" = FALSE
   AND to_tsvector('chinese_zh', coalesce(title,'') || ' ' || coalesce(details,''))
-      @@ websearch_to_tsquery('chinese_zh', '阿米娅');
+      @@ plainto_tsquery('chinese_zh', '阿米娅');
 ```
 
 应看到 `Bitmap Index Scan on idx_copilot_document_tsv`。
@@ -237,9 +265,9 @@ END
 $$;
 
 ALTER TEXT SEARCH CONFIGURATION chinese_zh
-    DROP MAPPING IF EXISTS FOR n, v, a, i, e, l, t;
+    DROP MAPPING IF EXISTS FOR n, v, a, i, e, l, t, d, r, m;
 ALTER TEXT SEARCH CONFIGURATION chinese_zh
-    ADD MAPPING FOR n, v, a, i, e, l, t WITH simple;
+    ADD MAPPING FOR n, v, a, i, e, l, t, d, r, m WITH simple;
 
 CREATE INDEX IF NOT EXISTS idx_copilot_document_tsv
     ON copilot

@@ -42,7 +42,10 @@ import java.time.LocalDateTime
  * 2. `save` 对已存在实体执行全列 UPDATE（基线行为保留）；`updateEntity` 保持 flushChanges 语义
  *    （只更新变化的列，通过 repository 内快照比对实现）；
  * 3. `stageName like keyword` 不带 % 通配符（= 精确匹配语义）；
- * 4. query 的 hasNext 两分支语义不同：聚合分支 `count > page*limit`，非聚合分支 `r.size >= limit`。
+ * 4. query 的 hasNext 两分支语义不同：聚合分支 `count > page*limit`，非聚合分支 `r.size >= limit`；
+ * 5. `documentKeyword` 走 FTS：`plainto_tsquery` 分词后按 AND 组合（词在任意位置即命中），
+ *    输入中的 `or` / `-` / 引号不被解释为运算符；embedded PG 无 zhparser，
+ *    测试基类用 `COPY = pg_catalog.simple` 建了同名替身配置，故中文分词质量不在覆盖范围内。
  */
 class CopilotRepositoryTest : TestDbSupport() {
 
@@ -743,6 +746,43 @@ class CopilotRepositoryTest : TestDbSupport() {
             setOf("c1", "c3", "c5", "c6"),
             queryCopilots(stageNames = listOf("1-7", "4-10")).first.map { it.title }.toSet(),
         )
+    }
+
+    /**
+     * `documentKeyword` 的 FTS 语义（`COPILOT_DOCUMENT_TSV_EXPR @@ plainto_tsquery('chinese_zh', ?)`）。
+     *
+     * 判别力：`plainto_tsquery` 把分词结果按 AND 组合，词出现在 title/details 任意位置都算命中。
+     * 若改回 `websearch_to_tsquery`，第 1、2 条断言会失败（无空格/带引号的输入会生成 `<->` 短语），
+     * 第 4 条也会失败（`or` 会被当成 OR 运算符）。
+     *
+     * 环境限制：embedded PG 无 zhparser，替身配置用 default parser，
+     * 这里覆盖的是 SQL 形状 / 参数绑定 / AND 语义，不覆盖中文分词质量。
+     */
+    @Test
+    fun `query document FTS combines terms with AND and ignores operators`() {
+        val a = repo.insertEntity(newCopilot(title = "alpha beta gamma")).copilotId
+        val b = repo.insertEntity(newCopilot(title = "delta", details = "alpha gamma", stageName = "2-8")).copilotId
+        val c = repo.insertEntity(newCopilot(title = "alpha beta", details = "zeta")).copilotId
+        repo.insertEntity(newCopilot(title = "alpha gamma", delete = true))
+
+        // 1. 非相邻词命中：'alpha' & 'gamma'（websearch 会生成 'alpha' <-> 'gamma' → 不命中）
+        assertEquals(setOf(a, b), queryCopilots(documentKeyword = "alpha,gamma").first.map { it.copilotId }.toSet())
+        // 2. 引号不产生短语语义
+        assertEquals(setOf(a, b), queryCopilots(documentKeyword = "\"alpha gamma\"").first.map { it.copilotId }.toSet())
+        // 3. AND 严格性：缺任一词即不命中（a、b 都没有 zeta）
+        assertEquals(listOf(c), queryCopilots(documentKeyword = "alpha zeta").first.map { it.copilotId })
+        // 4. 运算符不被解释：'or' 被当作普通词而不是 OR（websearch 会返回 a、b）
+        assertEquals(emptyList<CopilotEntity>(), queryCopilots(documentKeyword = "alpha or gamma").first)
+        // 5. 分词后无词元 → 空 tsquery 匹配 0 行且不抛异常
+        assertEquals(emptyList<CopilotEntity>(), queryCopilots(documentKeyword = "!!!").first)
+        // 6. 空白关键字被 isNotBlank 守卫跳过 FTS 条件（不是 0 行）
+        assertEquals(3L, queryCopilots(documentKeyword = "   ").second)
+        // 7. 与其它条件 AND 组合：b 的 stage 是 2-8，deleted 行被 delete=false 基条件排除
+        assertEquals(listOf(a), queryCopilots(documentKeyword = "alpha gamma", stageNameKeyword = "1-7").first.map { it.copilotId })
+        // 8. 分页与总数：命中 2 行，默认 copilot_id DESC → 第 2 页是 a
+        val (page, total) = queryCopilots(documentKeyword = "alpha gamma", page = 2, limit = 1)
+        assertEquals(2L, total)
+        assertEquals(listOf(a), page.map { it.copilotId })
     }
 
     @Test
