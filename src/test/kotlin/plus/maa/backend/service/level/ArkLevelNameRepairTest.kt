@@ -98,6 +98,7 @@ class ArkLevelNameRepairTest : TestDbSupport() {
 
         assertEquals(1, stat.scanned)
         assertEquals(1, stat.repaired)
+        assertEquals(0, stat.skipped)
         assertEquals(0, stat.stillEmpty)
         assertEquals("登临意", repository.findById(row.id)!!.catTwo)
     }
@@ -178,6 +179,41 @@ class ArkLevelNameRepairTest : TestDbSupport() {
         assertEquals(1, stat.stillEmpty)
         assertEquals("", repository.findById(broken.id)!!.catTwo)
         assertEquals("登临意", repository.findById(healthy.id)!!.catTwo)
+    }
+
+    @Test
+    fun repairCountsLostRaceAsSkipped() = runTest {
+        // 「查询到空值行之后、写入之前，该行已被并发写入填好」这一交错无法用真实 DB 确定性地
+        // 构造，故用 mock 注入：条件更新影响 0 行时应计为 skipped，而不是 repaired。
+        val racedRepository = mockk<ArkLevelRepository> {
+            every { findAllBlankCatTwoByCatOne(any()) } returns listOf(
+                ArkLevelEntity(
+                    id = 7,
+                    levelId = "activities/act1dp/level_act1dp_01",
+                    stageId = "act1dp_01",
+                    catOne = ArkLevelType.ACTIVITIES.display,
+                    catTwo = "",
+                    catThree = "DP-1",
+                ),
+            )
+            every { updateCatTwoById(7L, "登临意") } returns 0
+        }
+        val racedService = ArkLevelService(
+            properties = MaaCopilotProperties(),
+            githubRepo = mockk<GithubRepository>(relaxed = true),
+            redisCache = mockk<RedisCache>(relaxed = true),
+            arkLevelRepo = racedRepository,
+            json = defaultJson,
+            arkLevelConverter = mockk<ArkLevelConverter>(relaxed = true),
+            arkLevelEntityConverter = ArkLevelEntityConverter(),
+        )
+
+        val stat = racedService.repairMissingActivityNames(holder())
+
+        assertEquals(1, stat.scanned)
+        assertEquals(0, stat.repaired)
+        assertEquals(1, stat.skipped, "影响 0 行 = 竞争失败，值已被他人填好")
+        assertEquals(0, stat.stillEmpty)
     }
 
     @Test

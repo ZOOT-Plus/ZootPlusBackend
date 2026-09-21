@@ -294,20 +294,20 @@ class ArkLevelService(
         try {
             if (source == LevelNameRepairSource.STARTUP && redisCache.getCache<String>(REPAIR_LAST_RUN_KEY) != null) {
                 logI { "近期已执行过活动名回填，跳过本次启动触发" }
-                return@traceRun LevelNameRepairStat(0, 0, 0)
+                return@traceRun LevelNameRepairStat(0, 0, 0, 0)
             }
             val blank = withContext(Dispatchers.IO) {
                 arkLevelRepo.countBlankCatTwoByCatOne(ArkLevelType.ACTIVITIES.display)
             }
             if (blank == 0L) {
                 logI { "无缺失活动名，无需回填" }
-                return@traceRun LevelNameRepairStat(0, 0, 0)
+                return@traceRun LevelNameRepairStat(0, 0, 0, 0)
             }
             // 每日兜底强制刷新快照：活动名可能晚于地图文件发布，用旧快照重解析拿不到名字
             val holder = dataHolder(refresh = source == LevelNameRepairSource.DAILY)
             if (holder == null) {
                 logI { "游戏数据快照不可用（$blank 行待回填），留待下次执行" }
-                return@traceRun LevelNameRepairStat(blank.toInt(), 0, blank.toInt())
+                return@traceRun LevelNameRepairStat(blank.toInt(), 0, 0, blank.toInt())
             }
             val stat = repairMissingActivityNames(holder)
             if (source == LevelNameRepairSource.STARTUP) {
@@ -318,7 +318,7 @@ class ArkLevelService(
             throw e
         } catch (e: Exception) {
             logE(e) { "回填缺失活动名失败" }
-            LevelNameRepairStat(0, 0, 0)
+            LevelNameRepairStat(0, 0, 0, 0)
         }
     }
 
@@ -330,22 +330,24 @@ class ArkLevelService(
         val blanks = withContext(Dispatchers.IO) {
             arkLevelRepo.findAllBlankCatTwoByCatOne(ArkLevelType.ACTIVITIES.display)
         }
-        if (blanks.isEmpty()) return@traceRun LevelNameRepairStat(0, 0, 0)
+        if (blanks.isEmpty()) return@traceRun LevelNameRepairStat(0, 0, 0, 0)
 
         val parser = ArkLevelParserDelegate(holder)
         var repaired = 0
+        var skipped = 0
         var stillEmpty = 0
         blanks.forEach { entity ->
             val name = resolveActivityName(parser, entity)
-            if (name.isNullOrBlank()) {
-                stillEmpty++
-            } else {
-                withContext(Dispatchers.IO) { arkLevelRepo.updateCatTwoById(entity.id, name) }
-                repaired++
+            when {
+                name.isNullOrBlank() -> stillEmpty++
+                // 条件更新返回 0 表示该行已被并发的另一次回填填好：值已经是对的，无需再写，
+                // 更不能覆盖（见 ArkLevelRepository.updateCatTwoById）
+                withContext(Dispatchers.IO) { arkLevelRepo.updateCatTwoById(entity.id, name) } > 0 -> repaired++
+                else -> skipped++
             }
         }
-        logI { "活动名回填完成：扫描 ${blanks.size}，修复 $repaired，仍缺失 $stillEmpty" }
-        LevelNameRepairStat(blanks.size, repaired, stillEmpty)
+        logI { "活动名回填完成：扫描 ${blanks.size}，修复 $repaired，竞争跳过 $skipped，仍缺失 $stillEmpty" }
+        LevelNameRepairStat(blanks.size, repaired, skipped, stillEmpty)
     }
 
     /**

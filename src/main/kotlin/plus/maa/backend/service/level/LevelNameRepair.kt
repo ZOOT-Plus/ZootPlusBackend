@@ -30,6 +30,11 @@ data class LevelNameRepairStat(
     val scanned: Int,
     /** 本轮成功回填的行数。 */
     val repaired: Int,
+    /**
+     * 因并发写入而未回填的行数：查询到空值行之后、写入之前，该行已被另一个回填执行填好
+     * （条件更新影响 0 行）。不计入失败——值已经是对的，本轮无需再写。
+     */
+    val skipped: Int,
     /** 解析后仍无活动名的行数（上游数据缺失，留待下一轮自然重试）。 */
     val stillEmpty: Int,
 )

@@ -577,10 +577,25 @@ class ArkLevelRepositoryTest : TestDbSupport() {
     }
 
     @Test
-    fun updateCatTwoByIdCanWriteEmptyString() {
-        // 空串是合法取值（解析不出活动名时 parser 即写空串），更新方法不应把它当哨兵值
-        val entity = repository.insertEntity(newLevel(levelId = "act-1", catOne = "活动关卡", catTwo = "旧名"))
-        assertEquals(1, repository.updateCatTwoById(entity.id, ""))
-        assertEquals("", repository.findById(entity.id)!!.catTwo)
+    fun updateCatTwoByIdSkipsRowThatAlreadyHasValue() {
+        // 条件更新的核心：并发回填时不能用更旧快照解析出的名字覆盖已填好的值。
+        // 回填只查询空值行，被写坏的行不会再进入视野，因此这种覆盖不会自愈，必须在写入时就挡住。
+        val entity = repository.insertEntity(newLevel(levelId = "act-1", catOne = "活动关卡", catTwo = "登临意"))
+
+        assertEquals(0, repository.updateCatTwoById(entity.id, "旧快照解析出的名字"), "已有值不应被覆盖")
+        assertEquals("登临意", repository.findById(entity.id)!!.catTwo)
+    }
+
+    @Test
+    fun updateCatTwoByIdCanWriteEmptyStringToBlankRow() {
+        // 空串是合法取值（解析不出活动名时 parser 即写空串），不应把它当哨兵值排除；
+        // 但同样只在目标行仍为空时生效（NULL 与空串都算空）
+        val nullRow = repository.insertEntity(newLevel(levelId = "act-1", catOne = "活动关卡", catTwo = null))
+        val emptyRow = repository.insertEntity(newLevel(levelId = "act-2", catOne = "活动关卡", catTwo = ""))
+
+        assertEquals(1, repository.updateCatTwoById(nullRow.id, ""))
+        assertEquals("", repository.findById(nullRow.id)!!.catTwo)
+        assertEquals(1, repository.updateCatTwoById(emptyRow.id, "登临意"))
+        assertEquals("登临意", repository.findById(emptyRow.id)!!.catTwo)
     }
 }

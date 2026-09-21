@@ -265,16 +265,26 @@ class ArkLevelRepository(
     }
 
     /**
-     * 定向更新 cat_two，不触碰其它列。
+     * 仅在 cat_two 仍为空（NULL 或空串）时定向写入，不触碰其它列。
      *
      * 不能用 [saveAll]（全列 upsert）代替：回填与开放状态跑批可能并发，全列覆盖会把并发写入的
      * is_open / close_time 回退成读到的旧值。
      *
-     * @return 受影响行数
+     * 条件（`cat_two IS NULL OR cat_two = ''`）是必要的：多个回填执行可能重叠（三个触发点由互相
+     * 独立的标志守卫），若无条件写入，后到者会用更旧快照解析出的名字覆盖已填好的值——而回填只
+     * 查询空值行，被覆盖的错误名字不会自愈。条件更新相当于一次 DB 层的 compare-and-set，
+     * 后端多副本部署时同样成立。
+     *
+     * @return 受影响行数；0 表示目标行不存在或已被并发写入填好（竞争失败）
      */
     fun updateCatTwoById(id: Long, catTwo: String): Int {
         return jdbi.withHandleUnchecked { handle ->
-            handle.createUpdate("UPDATE ark_level SET cat_two = :catTwo WHERE id = :id")
+            handle.createUpdate(
+                """
+                UPDATE ark_level SET cat_two = :catTwo
+                WHERE id = :id AND (cat_two IS NULL OR cat_two = '')
+                """.trimIndent(),
+            )
                 .bind("catTwo", catTwo)
                 .bind("id", id)
                 .execute()
