@@ -229,6 +229,58 @@ class ArkLevelRepository(
         entities.forEachIndexed { i, entity -> entity.id = keys[i] }
     }
 
+    /**
+     * 统计指定分类下 cat_two 为空（NULL 或空串）的行数，供活动名回填任务做廉价门禁。
+     */
+    fun countBlankCatTwoByCatOne(catOne: String): Long {
+        return jdbi.withHandleUnchecked { handle ->
+            handle.createQuery(
+                "SELECT COUNT(*) FROM ark_level WHERE cat_one = :catOne AND (cat_two IS NULL OR cat_two = '')",
+            )
+                .bind("catOne", catOne)
+                .mapTo(Long::class.java)
+                .one()
+        }
+    }
+
+    /**
+     * 查询指定分类下 cat_two 为空（NULL 或空串）的行。
+     *
+     * 注意：「活动关卡」以外的分类不得用查询结果的 cat_three 重建地图数据——只有活动关卡满足
+     * `cat_three == 地图文件的 code`（其它分类的 parser 会覆写 cat_three，详见回填方案 §6.1）。
+     */
+    fun findAllBlankCatTwoByCatOne(catOne: String): List<ArkLevelEntity> {
+        return jdbi.withHandleUnchecked { handle ->
+            handle.createQuery(
+                """
+                SELECT * FROM ark_level
+                WHERE cat_one = :catOne AND (cat_two IS NULL OR cat_two = '')
+                ORDER BY id
+                """.trimIndent(),
+            )
+                .bind("catOne", catOne)
+                .mapTo<ArkLevelEntity>()
+                .list()
+        }
+    }
+
+    /**
+     * 定向更新 cat_two，不触碰其它列。
+     *
+     * 不能用 [saveAll]（全列 upsert）代替：回填与开放状态跑批可能并发，全列覆盖会把并发写入的
+     * is_open / close_time 回退成读到的旧值。
+     *
+     * @return 受影响行数
+     */
+    fun updateCatTwoById(id: Long, catTwo: String): Int {
+        return jdbi.withHandleUnchecked { handle ->
+            handle.createUpdate("UPDATE ark_level SET cat_two = :catTwo WHERE id = :id")
+                .bind("catTwo", catTwo)
+                .bind("id", id)
+                .execute()
+        }
+    }
+
     fun findAll(): List<ArkLevelEntity> {
         return jdbi.withHandleUnchecked { handle ->
             handle.createQuery("SELECT * FROM ark_level")

@@ -16,7 +16,12 @@ import plus.maa.backend.repository.entity.gamedata.ArkTower
 import plus.maa.backend.repository.entity.gamedata.ArkZone
 import java.util.Locale
 
-class ArkGameDataHolder private constructor(
+/**
+ * 游戏数据快照（stage / zone / activity / character / tower / crisis_v2 六张表）。
+ *
+ * 构造函数为 internal 而非 private：回填相关的测试需要构造内存快照桩，避免触网。
+ */
+class ArkGameDataHolder internal constructor(
     private val stageMap: Map<String, ArkStage>,
     private val zoneMap: Map<String, ArkZone>,
     private val zoneActivityMap: Map<String, ArkActivity>,
