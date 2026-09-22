@@ -6,6 +6,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
 import org.springframework.boot.context.event.ApplicationReadyEvent
 import org.springframework.context.event.EventListener
 import org.springframework.scheduling.annotation.Scheduled
@@ -39,10 +40,15 @@ class ArkLevelSyncTask(
     @Scheduled(cron = "0 0-15/15 4 * * ?", zone = "Asia/Shanghai")
     fun updateOpenStatus() = atomRun(openStatusSyncing) {
         try {
-            awaitAll(
-                async { arkLevelService.updateActivitiesOpenStatus() },
-                async { arkLevelService.updateCrisisV2OpenStatus() },
-            )
+            // 必须包一层 supervisorScope：awaitAll 中任一 async 失败会取消父 Job，若不隔离，
+            // finally 里的兜底回填进入时协程已是取消态，第一个挂起点就抛 CancellationException
+            // ——「开放状态更新失败也要回填」这层防护会静默失效（实测：进入函数但挂起点不执行）。
+            supervisorScope {
+                awaitAll(
+                    async { arkLevelService.updateActivitiesOpenStatus() },
+                    async { arkLevelService.updateCrisisV2OpenStatus() },
+                )
+            }
         } finally {
             // 每日兜底回填缺失的活动名：活动名可能晚于地图文件发布，同步那一刻拿不到名字的行
             // 需要后续重试才能补上。放在 finally 里，开放状态更新失败也不影响回填执行。

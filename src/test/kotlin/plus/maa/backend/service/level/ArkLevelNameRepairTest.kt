@@ -2,11 +2,10 @@ package plus.maa.backend.service.level
 
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
-import org.springframework.data.redis.core.StringRedisTemplate
-import org.springframework.data.redis.core.ValueOperations
 import plus.maa.backend.common.serialization.defaultJson
 import plus.maa.backend.common.utils.converter.ArkLevelConverter
 import plus.maa.backend.common.utils.converter.ArkLevelEntityConverter
@@ -25,8 +24,10 @@ import plus.maa.backend.repository.ktorm.ArkLevelRepository
  * 真实 embedded PG + 真实 [ArkLevelRepository]；游戏数据快照用内存构造的 [ArkGameDataHolder]
  * 桩（`internal constructor`），全程不触网。
  *
- * 未覆盖点：抓取远端快照（[ArkGameDataHolder.fetch]）本身、以及只有真 Redis 才能验的过期语义
- * （[RedisCache.getCache] 是 inline 函数，mock 只能替换其内部的 `redisTemplate`）。
+ * 未覆盖点：抓取远端快照（[ArkGameDataHolder.fetch]）本身，以及只有真 Redis 才能验的 TTL 语义
+ * （节流只断言「key 存在即跳过 / 不存在即执行」，不验证 24h 过期）。
+ *
+ * 需要 opt-in 到 [RedisCache] 的内部 API：节流的桩打在非 inline 的 setCacheStringIfAbsent 上。
  */
 @OptIn(RedisCache.RedisCacheInternalApi::class)
 class ArkLevelNameRepairTest : TestDbSupport() {
@@ -196,7 +197,7 @@ class ArkLevelNameRepairTest : TestDbSupport() {
                     catThree = "DP-1",
                 ),
             )
-            every { updateCatTwoById(7L, "登临意") } returns 0
+            every { updateCatTwoByIds(listOf(7L to "登临意")) } returns 0
         }
         val racedService = ArkLevelService(
             properties = MaaCopilotProperties(),
@@ -212,7 +213,7 @@ class ArkLevelNameRepairTest : TestDbSupport() {
 
         assertEquals(1, stat.scanned)
         assertEquals(0, stat.repaired)
-        assertEquals(1, stat.skipped, "影响 0 行 = 竞争失败，值已被他人填好")
+        assertEquals(1, stat.skipped, "实际影响 0 行 = 竞争失败，值已被他人填好")
         assertEquals(0, stat.stillEmpty)
     }
 
@@ -239,18 +240,47 @@ class ArkLevelNameRepairTest : TestDbSupport() {
 
     @Test
     fun startupRepairIsSkippedWithinThrottleWindow() = runTest {
-        val row = insertLevel()
-        // 模拟 Redis 中已存在上一次执行的记录。getCache/setCache 是 inline 函数无法直接 mock，
-        // 只能替换其内部使用的 redisTemplate（故需要 opt-in 到 RedisCache 的内部 API）。
-        val values = mockk<ValueOperations<String, String>>()
-        every { values.get(any<String>()) } returns "\"1\""
-        val redisTemplate = mockk<StringRedisTemplate>()
-        every { redisTemplate.opsForValue() } returns values
-        every { redisCache.redisTemplate } returns redisTemplate
+        // 节流走 RedisCache.setCacheIfAbsent（inline），它委托给非 inline 的 setCacheStringIfAbsent
+        // ——mockk 拦到的是后者（实测：只 stub redisTemplate 不生效，会一路走到真实抓取）。该方法的
+        // 返回值语义是「key 是否已存在」，返回 true 表示 24h 内已执行过。
+        //
+        // 用 mock repository 断言「门禁查询根本没发生」：比断言某个字段没变更强，且完全不触网。
+        val repo = mockk<ArkLevelRepository>()
+        every { redisCache.setCacheStringIfAbsent(any(), any(), any()) } returns true
+        val throttled = serviceWith(repo)
 
-        val stat = service.repairMissingActivityNames(LevelNameRepairSource.STARTUP)
+        val stat = throttled.repairMissingActivityNames(LevelNameRepairSource.STARTUP)
 
-        assertEquals(0, stat.repaired)
-        assertEquals("", repository.findById(row.id)!!.catTwo, "节流窗口内不执行回填")
+        assertEquals(0, stat.scanned)
+        verify(exactly = 0) { repo.countBlankCatTwoByCatOne(any()) }
     }
+
+    @Test
+    fun startupRepairProceedsPastThrottleWhenKeyAbsent() = runTest {
+        // 反向：key 不存在（返回 false）时必须继续往下走。同样用 mock repository 断言门禁查询
+        // 确实发生（返回 0 行 → 取快照之前就返回，不触网）。
+        // 这两条一起锁死布尔语义的方向——RedisCache 的返回值语义与 Spring Data Redis 相反，
+        // 改错方向会让「永远跳过」或「永远执行」，单侧断言捕获不到。
+        val repo = mockk<ArkLevelRepository> {
+            every { countBlankCatTwoByCatOne(any()) } returns 0
+        }
+        every { redisCache.setCacheStringIfAbsent(any(), any(), any()) } returns false
+        val proceeding = serviceWith(repo)
+
+        val stat = proceeding.repairMissingActivityNames(LevelNameRepairSource.STARTUP)
+
+        assertEquals(0, stat.scanned)
+        verify(exactly = 1) { repo.countBlankCatTwoByCatOne(ArkLevelType.ACTIVITIES.display) }
+    }
+
+    /** 用给定 repository 构造一个与本类同构的 service（其余依赖与 [service] 一致）。 */
+    private fun serviceWith(repository: ArkLevelRepository): ArkLevelService = ArkLevelService(
+        properties = MaaCopilotProperties(),
+        githubRepo = mockk<GithubRepository>(relaxed = true),
+        redisCache = redisCache,
+        arkLevelRepo = repository,
+        json = defaultJson,
+        arkLevelConverter = mockk<ArkLevelConverter>(relaxed = true),
+        arkLevelEntityConverter = ArkLevelEntityConverter(),
+    )
 }

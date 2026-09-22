@@ -111,7 +111,7 @@ class ArkLevelService(
                 // 协程取消必须继续传播，否则被取消的任务会继续往下跑
                 throw e
             } catch (e: Exception) {
-                log.error(e) { "[LEVEL] 获取游戏数据快照失败" }
+                log.error(e) { "获取游戏数据快照失败" }
                 cached
             }
         }
@@ -292,7 +292,7 @@ class ArkLevelService(
      */
     suspend fun repairMissingActivityNames(source: LevelNameRepairSource): LevelNameRepairStat = log.traceRun("LEVEL-NAME-REPAIR") {
         try {
-            if (source == LevelNameRepairSource.STARTUP && redisCache.getCache<String>(REPAIR_LAST_RUN_KEY) != null) {
+            if (source == LevelNameRepairSource.STARTUP && markStartupRepairRun()) {
                 logI { "近期已执行过活动名回填，跳过本次启动触发" }
                 return@traceRun LevelNameRepairStat(0, 0, 0, 0)
             }
@@ -310,9 +310,6 @@ class ArkLevelService(
                 return@traceRun LevelNameRepairStat(blank.toInt(), 0, 0, blank.toInt())
             }
             val stat = repairMissingActivityNames(holder)
-            if (source == LevelNameRepairSource.STARTUP) {
-                redisCache.setCache(REPAIR_LAST_RUN_KEY, "1", 24.hours)
-            }
             stat
         } catch (e: CancellationException) {
             throw e
@@ -320,6 +317,27 @@ class ArkLevelService(
             logE(e) { "回填缺失活动名失败" }
             LevelNameRepairStat(0, 0, 0, 0)
         }
+    }
+
+    /**
+     * 标记启动回填已执行，返回是否应跳过本次执行（24h 内已执行过）。
+     *
+     * 用 [RedisCache.setCacheIfAbsent] 的原子性替代「先查后写」两步：本方法由启动触发调用，
+     * 多副本部署或重复触发时，只有一个执行能拿到「首次」标记，其余直接跳过，避免重复抓取快照
+     * （实测 6 张表约 2.4 MB）与重复解析。
+     *
+     * 注意 [RedisCache.setCacheIfAbsent] 的返回值是「key 是否已存在」，而非 Spring Data Redis
+     * `ValueOperations.setIfAbsent` 的「是否写入成功」——两者语义相反（见 `RedisCache.kt` 中带
+     * timeout 分支的 `== false`）。改动 RedisCache 时需同步检查此处。
+     *
+     * Redis 不可用时返回 false（不节流、照常执行）：与原先 `getCache` 内部吞异常的降级行为一致，
+     * 不能因为缓存故障就让回填整个不执行。
+     */
+    private fun markStartupRepairRun(): Boolean = try {
+        redisCache.setCacheIfAbsent(REPAIR_LAST_RUN_KEY, REPAIR_LAST_RUN_FLAG, 24.hours)
+    } catch (e: Exception) {
+        log.warn(e) { "活动名回填的节流检查失败，本轮照常执行" }
+        false
     }
 
     /**
@@ -333,19 +351,19 @@ class ArkLevelService(
         if (blanks.isEmpty()) return@traceRun LevelNameRepairStat(0, 0, 0, 0)
 
         val parser = ArkLevelParserDelegate(holder)
-        var repaired = 0
-        var skipped = 0
-        var stillEmpty = 0
-        blanks.forEach { entity ->
-            val name = resolveActivityName(parser, entity)
-            when {
-                name.isNullOrBlank() -> stillEmpty++
-                // 条件更新返回 0 表示该行已被并发的另一次回填填好：值已经是对的，无需再写，
-                // 更不能覆盖（见 ArkLevelRepository.updateCatTwoById）
-                withContext(Dispatchers.IO) { arkLevelRepo.updateCatTwoById(entity.id, name) } > 0 -> repaired++
-                else -> skipped++
-            }
+        // 先解析出所有可用结果，再一次性批量写入：避免逐行一次 DB 往返
+        val resolved = blanks.mapNotNull { entity ->
+            resolveActivityName(parser, entity)
+                ?.takeIf { it.isNotBlank() }
+                ?.let { entity.id to it }
         }
+        val stillEmpty = blanks.size - resolved.size
+
+        // 条件更新只对仍为空的行生效；实际影响行数与待写行数的差额即竞争失败
+        // （该行已被并发的另一次回填填好：值已经是对的，本轮无需再写，更不能覆盖）
+        val repaired = withContext(Dispatchers.IO) { arkLevelRepo.updateCatTwoByIds(resolved) }
+        val skipped = resolved.size - repaired
+
         logI { "活动名回填完成：扫描 ${blanks.size}，修复 $repaired，竞争跳过 $skipped，仍缺失 $stillEmpty" }
         LevelNameRepairStat(blanks.size, repaired, skipped, stillEmpty)
     }
@@ -372,7 +390,7 @@ class ArkLevelService(
         return try {
             parser.parseLevel(tilePos, entity.sha)?.catTwo
         } catch (e: Exception) {
-            log.error(e) { "[LEVEL-NAME-REPAIR] 重建地图数据失败: id=${entity.id}, levelId=${entity.levelId}" }
+            log.error(e) { "重建地图数据失败: id=${entity.id}, levelId=${entity.levelId}" }
             null
         }
     }
@@ -418,5 +436,8 @@ class ArkLevelService(
          * 活动名回填的启动节流键。应用频繁重启时避免反复触发全量回填。
          */
         private const val REPAIR_LAST_RUN_KEY = "level:name-repair:last-run"
+
+        /** 节流键的占位值，存在即表示 24h 内已执行过。 */
+        private const val REPAIR_LAST_RUN_FLAG = "1"
     }
 }

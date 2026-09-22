@@ -265,7 +265,7 @@ class ArkLevelRepository(
     }
 
     /**
-     * 仅在 cat_two 仍为空（NULL 或空串）时定向写入，不触碰其它列。
+     * 批量：仅在 cat_two 仍为空（NULL 或空串）时定向写入，不触碰其它列。
      *
      * 不能用 [saveAll]（全列 upsert）代替：回填与开放状态跑批可能并发，全列覆盖会把并发写入的
      * is_open / close_time 回退成读到的旧值。
@@ -275,19 +275,24 @@ class ArkLevelRepository(
      * 查询空值行，被覆盖的错误名字不会自愈。条件更新相当于一次 DB 层的 compare-and-set，
      * 后端多副本部署时同样成立。
      *
-     * @return 受影响行数；0 表示目标行不存在或已被并发写入填好（竞争失败）
+     * 单个 [PreparedBatch] 完成全部写入，避免逐行一次 DB 往返（首次回填可达近千行）。
+     *
+     * @param updates id 与要写入的活动名
+     * @return 实际受影响行数；与 [updates] 的差额即竞争失败（目标行已被并发写入填好或不存在）
      */
-    fun updateCatTwoById(id: Long, catTwo: String): Int {
+    fun updateCatTwoByIds(updates: List<Pair<Long, String>>): Int {
+        if (updates.isEmpty()) return 0
         return jdbi.withHandleUnchecked { handle ->
-            handle.createUpdate(
+            val batch = handle.prepareBatch(
                 """
                 UPDATE ark_level SET cat_two = :catTwo
                 WHERE id = :id AND (cat_two IS NULL OR cat_two = '')
                 """.trimIndent(),
             )
-                .bind("catTwo", catTwo)
-                .bind("id", id)
-                .execute()
+            updates.forEach { (id, catTwo) ->
+                batch.bind("catTwo", catTwo).bind("id", id).add()
+            }
+            batch.execute().sum()
         }
     }
 
