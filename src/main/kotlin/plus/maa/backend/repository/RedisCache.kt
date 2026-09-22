@@ -92,7 +92,7 @@ class RedisCache(
         val result = if (!timeout.isPositive()) {
             redisTemplate.opsForValue().setIfAbsent(key, jsonString) == true
         } else {
-            redisTemplate.opsForValue().setIfAbsent(key, jsonString, timeout.toJavaDuration()) == false
+            redisTemplate.opsForValue().setIfAbsent(key, jsonString, timeout.toJavaDuration()) == true
         }
         return result
     }
