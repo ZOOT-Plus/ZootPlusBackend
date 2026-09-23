@@ -16,7 +16,8 @@ import java.time.LocalDateTime
  *
  * 覆盖方法：findByStageId / findAllByStageIds / findByLevelId / findAllOpenLevels / insertEntity /
  * findById / deleteById / existsById / save / findByLevelIdFuzzy / queryLevelByKeyword /
- * findAllShaBy / findAllByCatOne / saveAll / count（继承）。
+ * findAllShaBy / findAllByCatOne / saveAll / count（继承）/
+ * countBlankCatTwoByCatOne / findAllBlankCatTwoByCatOne / updateCatTwoByIds。
  *
  * 未覆盖点与基线记录：
  * - 唯一约束冲突：ark_level 表（V1__init.sql）无任何唯一约束（level_id/stage_id/name 均为普通索引），
@@ -500,5 +501,132 @@ class ArkLevelRepositoryTest : TestDbSupport() {
         assertEquals(setOf("第一行", "第二行"), fuzzy.map { it.name }.toSet())
         // findByLevelId 只返回其一（LIMIT 1）
         assertNotNull(repository.findByLevelId("dup"))
+    }
+
+    // ------------------------------------------------------------------ 空名回填支持
+
+    @Test
+    fun countBlankCatTwoByCatOneCountsNullAndEmptyOnly() {
+        repository.insertEntity(newLevel(levelId = "act-1", catOne = "活动关卡", catTwo = null))
+        repository.insertEntity(newLevel(levelId = "act-2", catOne = "活动关卡", catTwo = ""))
+        repository.insertEntity(newLevel(levelId = "act-3", catOne = "活动关卡", catTwo = "登临意"))
+        repository.insertEntity(newLevel(levelId = "main-1", catOne = "主题曲", catTwo = null))
+
+        assertEquals(2L, repository.countBlankCatTwoByCatOne("活动关卡"), "NULL 与空串都计入，有值行不计入")
+        assertEquals(1L, repository.countBlankCatTwoByCatOne("主题曲"), "其它分类不误召")
+        assertEquals(0L, repository.countBlankCatTwoByCatOne("不存在的分类"))
+        assertEquals(0L, repository.countBlankCatTwoByCatOne("活动"), "前缀不匹配")
+    }
+
+    @Test
+    fun countBlankCatTwoByCatOneWithNoRowsAndWithNoBlanks() {
+        assertEquals(0L, repository.countBlankCatTwoByCatOne("活动关卡"))
+
+        repository.insertEntity(newLevel(levelId = "act-1", catOne = "活动关卡", catTwo = "登临意"))
+        assertEquals(0L, repository.countBlankCatTwoByCatOne("活动关卡"))
+    }
+
+    @Test
+    fun findAllBlankCatTwoByCatOneReturnsBlanksOfThatCatOneOnly() {
+        val blankNull = repository.insertEntity(newLevel(levelId = "act-1", catOne = "活动关卡", catTwo = null))
+        val blankEmpty = repository.insertEntity(newLevel(levelId = "act-2", catOne = "活动关卡", catTwo = ""))
+        repository.insertEntity(newLevel(levelId = "act-3", catOne = "活动关卡", catTwo = "登临意"))
+        repository.insertEntity(newLevel(levelId = "main-1", catOne = "主题曲", catTwo = null))
+
+        val blanks = repository.findAllBlankCatTwoByCatOne("活动关卡")
+        assertEquals(setOf(blankNull.id, blankEmpty.id), blanks.map { it.id }.toSet())
+        assertEquals(setOf("act-1", "act-2"), blanks.map { it.levelId }.toSet())
+    }
+
+    @Test
+    fun findAllBlankCatTwoByCatOneEmptyTable() {
+        assertTrue(repository.findAllBlankCatTwoByCatOne("活动关卡").isEmpty())
+    }
+
+    @Test
+    fun updateCatTwoByIdsUpdatesOnlyCatTwo() {
+        // 回填与开放状态跑批可能并发（全列 upsert 会把 is_open/close_time 回写成旧值），
+        // 这里锁死「定向更新只改 cat_two」这一竞态防护。
+        val closeTime = LocalDateTime.of(2024, 5, 1, 12, 30, 0)
+        val entity = repository.insertEntity(
+            newLevel(
+                levelId = "activities/act1dp/level_act1dp_01", stageId = "act1dp_01", sha = "sha-1",
+                catOne = "活动关卡", catTwo = "", catThree = "DP-1", name = "登临意",
+                width = 9, height = 6, isOpen = true, closeTime = closeTime,
+            ),
+        )
+        val untouched = repository.insertEntity(newLevel(levelId = "act-2", catOne = "活动关卡", catTwo = ""))
+
+        assertEquals(1, repository.updateCatTwoByIds(listOf(entity.id to "登临意")))
+        assertEquals(0, repository.updateCatTwoByIds(listOf(999L to "登临意")), "不存在的行返回 0")
+
+        val loaded = repository.findById(entity.id)!!
+        assertEquals("登临意", loaded.catTwo)
+        assertEquals("activities/act1dp/level_act1dp_01", loaded.levelId)
+        assertEquals("act1dp_01", loaded.stageId)
+        assertEquals("sha-1", loaded.sha)
+        assertEquals("活动关卡", loaded.catOne)
+        assertEquals("DP-1", loaded.catThree)
+        assertEquals("登临意", loaded.name)
+        assertEquals(9, loaded.width)
+        assertEquals(6, loaded.height)
+        assertEquals(true, loaded.isOpen)
+        assertEquals(closeTime, loaded.closeTime)
+
+        assertEquals("", repository.findById(untouched.id)!!.catTwo, "未被指定的行不改动")
+    }
+
+    @Test
+    fun updateCatTwoByIdsSkipsRowThatAlreadyHasValue() {
+        // 条件更新的核心：并发回填时不能用更旧快照解析出的名字覆盖已填好的值。
+        // 回填只查询空值行，被写坏的行不会再进入视野，因此这种覆盖不会自愈，必须在写入时就挡住。
+        val entity = repository.insertEntity(newLevel(levelId = "act-1", catOne = "活动关卡", catTwo = "登临意"))
+
+        assertEquals(0, repository.updateCatTwoByIds(listOf(entity.id to "旧快照解析出的名字")), "已有值不应被覆盖")
+        assertEquals("登临意", repository.findById(entity.id)!!.catTwo)
+    }
+
+    @Test
+    fun updateCatTwoByIdsCanWriteEmptyStringToBlankRow() {
+        // 空串是合法取值（解析不出活动名时 parser 即写空串），不应把它当哨兵值排除；
+        // 但同样只在目标行仍为空时生效（NULL 与空串都算空）
+        val nullRow = repository.insertEntity(newLevel(levelId = "act-1", catOne = "活动关卡", catTwo = null))
+        val emptyRow = repository.insertEntity(newLevel(levelId = "act-2", catOne = "活动关卡", catTwo = ""))
+
+        assertEquals(1, repository.updateCatTwoByIds(listOf(nullRow.id to "")))
+        assertEquals("", repository.findById(nullRow.id)!!.catTwo)
+        assertEquals(1, repository.updateCatTwoByIds(listOf(emptyRow.id to "登临意")))
+        assertEquals("登临意", repository.findById(emptyRow.id)!!.catTwo)
+    }
+
+    @Test
+    fun updateCatTwoByIdsAffectedCountCountsOnlyWrittenRows() {
+        // 批量更新的返回值用于区分 repaired / skipped：必须只统计真正写成功的行，
+        // 差额即竞争失败（条件未满足的行：已有值或不存在的 id）
+        val blank = repository.insertEntity(newLevel(levelId = "act-blank", catOne = "活动关卡", catTwo = ""))
+        val blankNull = repository.insertEntity(newLevel(levelId = "act-null", catOne = "活动关卡", catTwo = null))
+        val valued = repository.insertEntity(newLevel(levelId = "act-valued", catOne = "活动关卡", catTwo = "已有名"))
+
+        val affected = repository.updateCatTwoByIds(
+            listOf(
+                blank.id to "甲",
+                valued.id to "乙",
+                9999L to "丙",
+                blankNull.id to "丁",
+            ),
+        )
+
+        assertEquals(2, affected, "只有两个空值行被写入；有值行与不存在的行都不计")
+        assertEquals("甲", repository.findById(blank.id)!!.catTwo)
+        assertEquals("丁", repository.findById(blankNull.id)!!.catTwo)
+        assertEquals("已有名", repository.findById(valued.id)!!.catTwo)
+    }
+
+    @Test
+    fun updateCatTwoByIdsEmptyListNoOp() {
+        repository.insertEntity(newLevel(levelId = "act-1", catOne = "活动关卡", catTwo = ""))
+
+        assertEquals(0, repository.updateCatTwoByIds(emptyList()))
+        assertEquals("", repository.findById(1L)!!.catTwo)
     }
 }

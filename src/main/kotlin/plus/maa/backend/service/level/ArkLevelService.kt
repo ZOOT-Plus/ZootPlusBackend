@@ -1,11 +1,14 @@
 package plus.maa.backend.service.level
 
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.Json
@@ -16,7 +19,6 @@ import org.springframework.stereotype.Service
 import org.springframework.web.reactive.function.client.WebClient
 import org.springframework.web.util.DefaultUriBuilderFactory
 import plus.maa.backend.common.extensions.awaitString
-import plus.maa.backend.common.extensions.lazySuspend
 import plus.maa.backend.common.extensions.meetAll
 import plus.maa.backend.common.extensions.traceRun
 import plus.maa.backend.common.utils.converter.ArkLevelConverter
@@ -26,6 +28,7 @@ import plus.maa.backend.controller.response.copilot.ArkLevelInfo
 import plus.maa.backend.repository.GithubRepository
 import plus.maa.backend.repository.RedisCache
 import plus.maa.backend.repository.entity.ArkLevel
+import plus.maa.backend.repository.entity.ArkLevelEntity
 import plus.maa.backend.repository.entity.gamedata.ArkTilePos
 import plus.maa.backend.repository.entity.gamedata.MaaArkStage
 import plus.maa.backend.repository.entity.github.GithubCommit
@@ -38,6 +41,7 @@ import java.time.Duration
 import java.time.LocalDateTime
 import java.time.ZoneOffset
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.time.Duration.Companion.hours
 
 /**
  * @author dragove
@@ -72,8 +76,46 @@ class ArkLevelService(
                 ),
             )
             .build()
-    private val fetchDataHolder = lazySuspend { ArkGameDataHolder.fetch(webClient) }
-    private val fetchLevelParser = lazySuspend { ArkLevelParserDelegate(fetchDataHolder()) }
+
+    /**
+     * 游戏数据快照的当前值。null 表示尚未成功抓取过。
+     */
+    @Volatile
+    private var dataHolder: ArkGameDataHolder? = null
+
+    /**
+     * 快照抓取锁。同步任务、每日任务、启动回填都可能触发全量抓取（6 张表合计约 2.4 MB），
+     * 串行化以避免并发重复下载。
+     *
+     * 注意：持锁期间会发起网络请求（单请求 30s 超时），故已缓存的读路径不取锁。
+     */
+    private val dataHolderMutex = Mutex()
+
+    /**
+     * 取游戏数据快照。
+     *
+     * @param refresh 是否强制重新抓取。为 false 时返回进程内已缓存的快照，未缓存则抓取一次。
+     * @return 快照；强制刷新失败时回退到旧快照（可能为 null 表示从未成功抓取过）。
+     *
+     * 抓取失败不抛异常：调用方（回填、开放状态更新）都是兜底任务，用旧快照继续好过整个任务失败。
+     */
+    private suspend fun dataHolder(refresh: Boolean = false): ArkGameDataHolder? {
+        if (!refresh) dataHolder?.let { return it }
+        return dataHolderMutex.withLock {
+            val cached = dataHolder
+            // 双重检查：并发进入时，先到者已抓取完成则直接复用
+            if (cached != null && !refresh) return@withLock cached
+            try {
+                ArkGameDataHolder.fetch(webClient).also { dataHolder = it }
+            } catch (e: CancellationException) {
+                // 协程取消必须继续传播，否则被取消的任务会继续往下跑
+                throw e
+            } catch (e: Exception) {
+                log.error(e) { "获取游戏数据快照失败" }
+                cached
+            }
+        }
+    }
 
     @get:Cacheable("arkLevelInfos")
     val arkLevelInfos: List<ArkLevelInfo>
@@ -111,8 +153,17 @@ class ArkLevelService(
                 val shaSet = withContext(Dispatchers.IO) { arkLevelRepo.findAllShaBy() }.map { it.sha }.toSet()
                 val filtered = trees.filter { !shaSet.contains(it.sha) }
 
-                val parser = fetchLevelParser()
-                downloadAndSaveLevelDatum(filtered, parser)
+                // 有新地图文件时刷新游戏数据快照：快照与进程同生命周期，不刷新的话新活动的活动名
+                // 在进程重启前拿不到（缺失活动名的成因之一）。无新文件时不做任何下载。
+                if (filtered.isEmpty()) {
+                    logI { "无新增地图数据" }
+                } else {
+                    val holder = dataHolder(refresh = true) ?: error("游戏数据快照不可用，无法解析地图数据")
+                    downloadAndSaveLevelDatum(filtered, ArkLevelParserDelegate(holder))
+
+                    // 新增文件解析完立即回填一次，让新活动的活动名尽快就位
+                    repairMissingActivityNames(LevelNameRepairSource.SYNC)
+                }
             }
             if (!stale) logI { "地图数据已是最新" }
         } catch (e: Exception) {
@@ -218,7 +269,8 @@ class ArkLevelService(
      */
     suspend fun updateCrisisV2OpenStatus() = log.traceRun("CRISIS-V2-OPEN-STATUS") {
         logI { "准备更新开放状态" }
-        val holder = ArkGameDataHolder.updateCrisisV2Info(fetchDataHolder(), webClient)
+        val holder = dataHolder() ?: error("游戏数据快照不可用，无法更新危机合约开放状态")
+        ArkGameDataHolder.updateCrisisV2Info(holder, webClient)
         val nowTime = LocalDateTime.now()
 
         updateLevelsOfTypeInBatch(ArkLevelType.RUNE) { entity ->
@@ -227,6 +279,120 @@ class ArkLevelService(
             entity.isOpen = entity.closeTime?.isAfter(nowTime)
         }
         logI { "开放状态更新完毕" }
+    }
+
+    /**
+     * 回填空缺的活动名（`cat_two` 为空的活动关卡行），见 [LevelNameRepairSource]。
+     *
+     * **幂等**：只处理当前仍为空的行，解析不出活动名时不写库。因此「历史数据的一次性回填」与
+     * 「后续增量兜底」是同一段代码的首次与后续执行，可安全地挂在多个触发点上重复调用。
+     *
+     * 执行顺序：节流（仅启动触发）→ 廉价门禁（一条 COUNT）→ 取/刷新快照 → 逐行重建地图数据并解析。
+     * 门禁在取快照之前，因此无空值行时既不触网也不占锁。
+     */
+    suspend fun repairMissingActivityNames(source: LevelNameRepairSource): LevelNameRepairStat = log.traceRun("LEVEL-NAME-REPAIR") {
+        try {
+            if (source == LevelNameRepairSource.STARTUP && markStartupRepairRun()) {
+                logI { "近期已执行过活动名回填，跳过本次启动触发" }
+                return@traceRun LevelNameRepairStat(0, 0, 0, 0)
+            }
+            val blank = withContext(Dispatchers.IO) {
+                arkLevelRepo.countBlankCatTwoByCatOne(ArkLevelType.ACTIVITIES.display)
+            }
+            if (blank == 0L) {
+                logI { "无缺失活动名，无需回填" }
+                return@traceRun LevelNameRepairStat(0, 0, 0, 0)
+            }
+            // 每日兜底强制刷新快照：活动名可能晚于地图文件发布，用旧快照重解析拿不到名字
+            val holder = dataHolder(refresh = source == LevelNameRepairSource.DAILY)
+            if (holder == null) {
+                logI { "游戏数据快照不可用（$blank 行待回填），留待下次执行" }
+                return@traceRun LevelNameRepairStat(blank.toInt(), 0, 0, blank.toInt())
+            }
+            val stat = repairMissingActivityNames(holder)
+            stat
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logE(e) { "回填缺失活动名失败" }
+            LevelNameRepairStat(0, 0, 0, 0)
+        }
+    }
+
+    /**
+     * 标记启动回填已执行，返回是否应跳过本次执行（24h 内已执行过）。
+     *
+     * 用 [RedisCache.setCacheIfAbsent] 的原子性替代「先查后写」两步：本方法由启动触发调用，
+     * 多副本部署或重复触发时，只有一个执行能拿到「首次」标记，其余直接跳过，避免重复抓取快照
+     * （实测 6 张表约 2.4 MB）与重复解析。
+     *
+     * 注意 [RedisCache.setCacheIfAbsent] 的返回值是「key 是否已存在」，而非 Spring Data Redis
+     * `ValueOperations.setIfAbsent` 的「是否写入成功」——两者语义相反（见 `RedisCache.kt` 中带
+     * timeout 分支的 `== false`）。改动 RedisCache 时需同步检查此处。
+     *
+     * Redis 不可用时返回 false（不节流、照常执行）：与原先 `getCache` 内部吞异常的降级行为一致，
+     * 不能因为缓存故障就让回填整个不执行。
+     */
+    private fun markStartupRepairRun(): Boolean = try {
+        redisCache.setCacheIfAbsent(REPAIR_LAST_RUN_KEY, REPAIR_LAST_RUN_FLAG, 24.hours)
+    } catch (e: Exception) {
+        log.warn(e) { "活动名回填的节流检查失败，本轮照常执行" }
+        false
+    }
+
+    /**
+     * 用给定快照执行一次回填。与 [repairMissingActivityNames] 的差别仅在触发来源相关的
+     * 节流与快照刷新，实体逻辑完全一致，便于测试。
+     */
+    internal suspend fun repairMissingActivityNames(holder: ArkGameDataHolder): LevelNameRepairStat = log.traceRun("LEVEL-NAME-REPAIR") {
+        val blanks = withContext(Dispatchers.IO) {
+            arkLevelRepo.findAllBlankCatTwoByCatOne(ArkLevelType.ACTIVITIES.display)
+        }
+        if (blanks.isEmpty()) return@traceRun LevelNameRepairStat(0, 0, 0, 0)
+
+        val parser = ArkLevelParserDelegate(holder)
+        // 先解析出所有可用结果，再一次性批量写入：避免逐行一次 DB 往返
+        val resolved = blanks.mapNotNull { entity ->
+            resolveActivityName(parser, entity)
+                ?.takeIf { it.isNotBlank() }
+                ?.let { entity.id to it }
+        }
+        val stillEmpty = blanks.size - resolved.size
+
+        // 条件更新只对仍为空的行生效；实际影响行数与待写行数的差额即竞争失败
+        // （该行已被并发的另一次回填填好：值已经是对的，本轮无需再写，更不能覆盖）
+        val repaired = withContext(Dispatchers.IO) { arkLevelRepo.updateCatTwoByIds(resolved) }
+        val skipped = resolved.size - repaired
+
+        logI { "活动名回填完成：扫描 ${blanks.size}，修复 $repaired，竞争跳过 $skipped，仍缺失 $stillEmpty" }
+        LevelNameRepairStat(blanks.size, repaired, skipped, stillEmpty)
+    }
+
+    /**
+     * 由数据库行重建地图数据并重新解析出活动名。
+     *
+     * 所有 parser 只读取地图文件的 code/levelId/stageId/name/width/height 六个字段（不读地图格子
+     * `tiles`/`view`），这六个字段 `ark_level` 表均有保存，故无需下载地图文件。前提是
+     * `cat_three == 地图文件的 code`，该等式**只对活动关卡成立**（其它分类的 parser 会覆写
+     * cat_three，见 [ArkLevelParserDelegate]），因此调用方必须把范围限定为活动关卡。
+     *
+     * 单行解析异常（例如历史脏数据导致 parser 的空断言失败）不上抛：批量回填不应因一行而中断。
+     */
+    private fun resolveActivityName(parser: ArkLevelParserDelegate, entity: ArkLevelEntity): String? {
+        val tilePos = ArkTilePos(
+            code = entity.catThree,
+            levelId = entity.levelId,
+            name = entity.name,
+            stageId = entity.stageId,
+            width = entity.width,
+            height = entity.height,
+        )
+        return try {
+            parser.parseLevel(tilePos, entity.sha)?.catTwo
+        } catch (e: Exception) {
+            log.error(e) { "重建地图数据失败: id=${entity.id}, levelId=${entity.levelId}" }
+            null
+        }
     }
 
     suspend fun updateLevelsOfTypeInBatch(
@@ -263,5 +429,15 @@ class ArkLevelService(
         block.invoke()
         redisCache.setData(key, requiredValue)
         return true
+    }
+
+    companion object {
+        /**
+         * 活动名回填的启动节流键。应用频繁重启时避免反复触发全量回填。
+         */
+        private const val REPAIR_LAST_RUN_KEY = "level:name-repair:last-run"
+
+        /** 节流键的占位值，存在即表示 24h 内已执行过。 */
+        private const val REPAIR_LAST_RUN_FLAG = "1"
     }
 }
