@@ -40,7 +40,6 @@ import plus.maa.backend.service.model.CommentStatus
 import plus.maa.backend.service.model.CopilotSetStatus
 import plus.maa.backend.service.model.CopilotType
 import plus.maa.backend.service.model.RatingType
-import plus.maa.backend.service.segment.SegmentService
 import plus.maa.backend.service.sensitiveword.SensitiveWordService
 import java.math.RoundingMode
 import java.time.LocalDateTime
@@ -69,7 +68,6 @@ class CopilotService(
     private val commentsAreaRepository: CommentsAreaRepository,
     private val properties: MaaCopilotProperties,
     private val sensitiveWordService: SensitiveWordService,
-    private val segmentService: SegmentService,
     private val siteMessageService: SiteMessageService,
 ) {
     private val log = KotlinLogging.logger { }
@@ -154,7 +152,6 @@ class CopilotService(
         if (!opers.isNullOrEmpty()) {
             copilotRepository.insertOperators(copilotId, opers.map { it.name })
         }
-        segmentService.updateIndex(copilotId, entity.title, entity.details)
         if (request.status == CopilotSetStatus.PUBLIC) {
             try {
                 siteMessageService.notifyCopilotPublished(loginUserId, copilotId, entity.title)
@@ -268,39 +265,7 @@ class CopilotService(
         }
 
         var inCopilotIds: List<Long>? = request.copilotIds
-        if (!(keyword?.length == 1 && keyword[0].isLetterOrDigit())) {
-            segmentService.getSegment(keyword)
-                .takeIf {
-                    it.isNotEmpty()
-                }
-                ?.let { words ->
-                    val idList = words.mapNotNull {
-                        val result = segmentService.fetchIndexInfo(it)
-                        if (it.equals(keyword, ignoreCase = true) && result.isEmpty()) {
-                            null
-                        } else {
-                            result
-                        }
-                    }
-
-                    val intersection = when {
-                        idList.isEmpty() -> emptySet()
-                        else -> {
-                            val iterator = idList.iterator()
-                            val result = HashSet(iterator.next())
-                            while (iterator.hasNext()) {
-                                result.retainAll(iterator.next())
-                            }
-                            result
-                        }
-                    }
-
-                    if (intersection.isEmpty()) {
-                        return CopilotPageInfo(false, 1, 0, emptyList())
-                    }
-                    inCopilotIds = inCopilotIds?.intersect(intersection)?.toList() ?: intersection.toList()
-                }
-        }
+        val documentKeyword = keyword?.takeIf { it.isNotEmpty() }
 
         val requestStatus = if (request.uploaderId == ME && userId != null) {
             request.status
@@ -337,6 +302,7 @@ class CopilotService(
                 status = requestStatus,
                 stageNameKeyword = stageNameKeyword,
                 stageNames = stageNames,
+                documentKeyword = documentKeyword,
                 inUserIds = inUserIds,
                 inCopilotIds = inCopilotIds,
                 onlyFollowingUserId = if (request.onlyFollowing) userId else null,
@@ -446,8 +412,6 @@ class CopilotService(
                 throw MaaResultException(400, "作业类型不可更改")
             }
 
-            segmentService.removeIndex(copilotId, title, details)
-
             // 从公开改为隐藏时，如果数据存在缓存中则需要清除缓存
             if (status == CopilotSetStatus.PUBLIC && request.status == CopilotSetStatus.PRIVATE) cIdToDeleteCache = copilotId
 
@@ -459,7 +423,6 @@ class CopilotService(
             uploadTime = LocalDateTime.now()
         }.apply {
             Cache.invalidateCopilotInfoByCid(copilotId)
-            segmentService.updateIndex(copilotId, title, details)
             copilotRepository.replaceOperators(copilotId, dto.opers?.map { it.name } ?: emptyList())
         }
 

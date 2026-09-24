@@ -116,8 +116,6 @@ dependencies {
     implementation("org.mapstruct:mapstruct:$mapstructVersion")
     kapt("org.mapstruct:mapstruct-processor:$mapstructVersion")
 
-    implementation("com.github.magese:ik-analyzer:8.5.0")
-
     implementation("org.eclipse.jgit:org.eclipse.jgit:7.7.0.202606012155-r")
     implementation("org.eclipse.jgit:org.eclipse.jgit.ssh.apache.agent:7.7.0.202606012155-r")
     implementation("org.freemarker:freemarker:2.3.34")

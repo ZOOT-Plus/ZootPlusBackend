@@ -8,13 +8,15 @@ services:
       - "6379:6379"
     restart: always
   db:
-    image: postgres:17-alpine
+    image: docker.io/abcfy2/zhparser:18-alpine
     container_name: postgres
     restart: always
+    command: ["postgres", "-c", "zhparser.extra_dicts=arknights.txt"]
     ports:
       - "5432:5432"
     volumes:
-      - .././data/:/var/lib/postgresql/data/
+      - ../data/:/var/lib/postgresql/
+      - ../src/main/resources/arknights.txt:/usr/local/share/postgresql/tsearch_data/arknights.txt:ro
     environment:
       POSTGRES_PASSWORD: 1234
   zootplusbackend:

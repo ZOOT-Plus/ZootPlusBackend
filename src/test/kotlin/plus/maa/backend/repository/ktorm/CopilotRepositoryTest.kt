@@ -25,14 +25,12 @@ import java.time.LocalDateTime
  *      1. `CopilotService.upload` / `update` 的干员批量写入与先删后插（insertOperators/replaceOperators）；
  *      2. `CopilotScoreRefreshTask.refresh` 的 batchUpdateHotScores + RatingRepository 聚合
  *         （热度公式 getHotScore 与 arkLevelService 关卡冷却为纯逻辑，不覆盖）；
- *      3. `SegmentService.afterPropertiesSet` 的全量扫描（findAllNotDeletedIdTitleDetails；
- *         IK 分词与内存 INDEX 为纯内存逻辑，不覆盖）；
- *      4. `CopilotService.query` 的复合条件分页查询（queryCopilots()，含 onlyFollowing /
+ *      3. `CopilotService.query` 的复合条件分页查询（queryCopilots()，含 onlyFollowing /
  *         includeOps / notIncludeOps 子查询、三键两向排序、分页与总数）。
  *
  * 未覆盖点及原因：
- *  - `CopilotService.upload/query/edit` 完整流程：依赖 RedisCache、SensitiveWordService、SegmentService、
- *    SiteMessageService、ArkLevelService、InternalComposeCache 等 12 个服务，无法脱离 Spring 上下文构造，
+ *  - `CopilotService.upload/query/edit` 完整流程：依赖 RedisCache、SensitiveWordService、
+ *    SiteMessageService、ArkLevelService、InternalComposeCache 等服务，无法脱离 Spring 上下文构造，
  *    只测到 repository 层 + DB 原生查询点；
  *  - `CopilotScoreRefreshTask.refreshHotScores/refreshTop100HotScores`：Redis 热度榜与分页循环未覆盖
  *    （redisCache 依赖），其 DB 部分（batchUpdateHotScores + countByTypeKeyInRatingAfter + countNotDeleted/findNotDeletedPage）已覆盖；
@@ -44,7 +42,10 @@ import java.time.LocalDateTime
  * 2. `save` 对已存在实体执行全列 UPDATE（基线行为保留）；`updateEntity` 保持 flushChanges 语义
  *    （只更新变化的列，通过 repository 内快照比对实现）；
  * 3. `stageName like keyword` 不带 % 通配符（= 精确匹配语义）；
- * 4. query 的 hasNext 两分支语义不同：聚合分支 `count > page*limit`，非聚合分支 `r.size >= limit`。
+ * 4. query 的 hasNext 两分支语义不同：聚合分支 `count > page*limit`，非聚合分支 `r.size >= limit`；
+ * 5. `documentKeyword` 走 FTS：`plainto_tsquery` 分词后按 AND 组合（词在任意位置即命中），
+ *    输入中的 `or` / `-` / 引号不被解释为运算符；embedded PG 无 zhparser，
+ *    测试基类用 `COPY = pg_catalog.simple` 建了同名替身配置，故中文分词质量不在覆盖范围内。
  */
 class CopilotRepositoryTest : TestDbSupport() {
 
@@ -130,7 +131,7 @@ class CopilotRepositoryTest : TestDbSupport() {
     }
 
     /**
-     * `CopilotService.query` 的 DB 部分（docs/migration-analysis.md §3 #2，收敛到
+     * `CopilotService.query` 的 DB 部分（见 docs/zhparser-migration.md，收敛到
      * CopilotRepository.queryCopilots）。返回 (当前页实体列表, 过滤后总数)。
      */
     private fun queryCopilots(
@@ -138,6 +139,7 @@ class CopilotRepositoryTest : TestDbSupport() {
         status: CopilotSetStatus? = null,
         stageNameKeyword: String? = null,
         stageNames: List<String>? = null,
+        documentKeyword: String? = null,
         inUserIds: List<Long>? = null,
         inCopilotIds: List<Long>? = null,
         onlyFollowing: Boolean = false,
@@ -154,6 +156,7 @@ class CopilotRepositoryTest : TestDbSupport() {
             status = status,
             stageNameKeyword = stageNameKeyword,
             stageNames = stageNames,
+            documentKeyword = documentKeyword,
             inUserIds = inUserIds,
             inCopilotIds = inCopilotIds,
             onlyFollowingUserId = if (onlyFollowing) userId else null,
@@ -652,28 +655,7 @@ class CopilotRepositoryTest : TestDbSupport() {
         )
     }
 
-    // ---------- 原生查询点 3：SegmentService.afterPropertiesSet 的全量扫描（§3 #9） ----------
-
-    @Test
-    fun `segmentService index scan only reads not-deleted copilots with title and details`() {
-        val keep1 = repo.insertEntity(newCopilot(title = "t1", details = "d1"))
-        val keep2 = repo.insertEntity(newCopilot(title = "t2", details = null))
-        val deleted = repo.insertEntity(newCopilot(title = "t3", details = "d3"))
-        deleted.delete = true
-        repo.updateEntity(deleted)
-
-        // 对应 SegmentService.afterPropertiesSet（索引构建只读三列）
-        val scanned = repo.findAllNotDeletedIdTitleDetails()
-
-        val byId = scanned.associateBy { it.copilotId }
-        assertEquals(setOf(keep1.copilotId, keep2.copilotId), byId.keys, "delete=true 的作业不进索引")
-        assertEquals("t1", byId[keep1.copilotId]!!.title)
-        assertEquals("d1", byId[keep1.copilotId]!!.details)
-        assertEquals("t2", byId[keep2.copilotId]!!.title)
-        assertNull(byId[keep2.copilotId]!!.details, "details 可空，分词时按 null 处理")
-    }
-
-    // ---------- 原生查询点 4：CopilotService.query 复合条件分页查询（§3 #2） ----------
+    // ---------- 原生查询点 3：CopilotService.query 复合条件分页查询（§3 #2） ----------
 
     /** 构造 query 测试数据集：返回 title → id 映射。 */
     private fun seedQueryData(): Map<String, Long> {
@@ -764,6 +746,43 @@ class CopilotRepositoryTest : TestDbSupport() {
             setOf("c1", "c3", "c5", "c6"),
             queryCopilots(stageNames = listOf("1-7", "4-10")).first.map { it.title }.toSet(),
         )
+    }
+
+    /**
+     * `documentKeyword` 的 FTS 语义（`COPILOT_DOCUMENT_TSV_EXPR @@ plainto_tsquery('chinese_zh', ?)`）。
+     *
+     * 判别力：`plainto_tsquery` 把分词结果按 AND 组合，词出现在 title/details 任意位置都算命中。
+     * 若改回 `websearch_to_tsquery`，第 1、2 条断言会失败（无空格/带引号的输入会生成 `<->` 短语），
+     * 第 4 条也会失败（`or` 会被当成 OR 运算符）。
+     *
+     * 环境限制：embedded PG 无 zhparser，替身配置用 default parser，
+     * 这里覆盖的是 SQL 形状 / 参数绑定 / AND 语义，不覆盖中文分词质量。
+     */
+    @Test
+    fun `query document FTS combines terms with AND and ignores operators`() {
+        val a = repo.insertEntity(newCopilot(title = "alpha beta gamma")).copilotId
+        val b = repo.insertEntity(newCopilot(title = "delta", details = "alpha gamma", stageName = "2-8")).copilotId
+        val c = repo.insertEntity(newCopilot(title = "alpha beta", details = "zeta")).copilotId
+        repo.insertEntity(newCopilot(title = "alpha gamma", delete = true))
+
+        // 1. 非相邻词命中：'alpha' & 'gamma'（websearch 会生成 'alpha' <-> 'gamma' → 不命中）
+        assertEquals(setOf(a, b), queryCopilots(documentKeyword = "alpha,gamma").first.map { it.copilotId }.toSet())
+        // 2. 引号不产生短语语义
+        assertEquals(setOf(a, b), queryCopilots(documentKeyword = "\"alpha gamma\"").first.map { it.copilotId }.toSet())
+        // 3. AND 严格性：缺任一词即不命中（a、b 都没有 zeta）
+        assertEquals(listOf(c), queryCopilots(documentKeyword = "alpha zeta").first.map { it.copilotId })
+        // 4. 运算符不被解释：'or' 被当作普通词而不是 OR（websearch 会返回 a、b）
+        assertEquals(emptyList<CopilotEntity>(), queryCopilots(documentKeyword = "alpha or gamma").first)
+        // 5. 分词后无词元 → 空 tsquery 匹配 0 行且不抛异常
+        assertEquals(emptyList<CopilotEntity>(), queryCopilots(documentKeyword = "!!!").first)
+        // 6. 空白关键字被 isNotBlank 守卫跳过 FTS 条件（不是 0 行）
+        assertEquals(3L, queryCopilots(documentKeyword = "   ").second)
+        // 7. 与其它条件 AND 组合：b 的 stage 是 2-8，deleted 行被 delete=false 基条件排除
+        assertEquals(listOf(a), queryCopilots(documentKeyword = "alpha gamma", stageNameKeyword = "1-7").first.map { it.copilotId })
+        // 8. 分页与总数：命中 2 行，默认 copilot_id DESC → 第 2 页是 a
+        val (page, total) = queryCopilots(documentKeyword = "alpha gamma", page = 2, limit = 1)
+        assertEquals(2L, total)
+        assertEquals(listOf(a), page.map { it.copilotId })
     }
 
     @Test
