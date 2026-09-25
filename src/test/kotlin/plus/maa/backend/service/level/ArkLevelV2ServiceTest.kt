@@ -86,20 +86,50 @@ class ArkLevelV2ServiceTest : TestDbSupport() {
     }
 
     @Test
-    fun versionChangesWhenOpenStatusFlipsInPlace() {
-        // 开放状态跑批原地改写 is_open/close_time 而不产生新行——仅用行数或最大 id 做版本号会漏掉这类变化
+    fun versionIgnoresFieldsAbsentFromTheResponse() {
+        // 摘要只承诺「响应体相同 ⇒ 版本号相同」。is_open / close_time 不出现在 ArkLevelInfoV2 里
+        // （它是服务端内部状态，前端与 4 套生成 SDK 都读不到），所以这两列变化时响应体逐字节不变。
+        // 若把它们算进摘要，每日开放状态跑批就会让全量客户端重下整份 payload（full 变体 660K），
+        // 并把 ETag 条件请求从 304 退化成 200——白付流量、换不来任何新信息。
         val row = insert(isOpen = true)
         val before = versionOf()
 
-        repository.updateCatTwoByIds(emptyList()) // 无关操作，确保不是它带来的变化
         repository.saveAll(listOf(repository.findById(row.id)!!.apply { isOpen = false }))
-        assertNotEquals(before, versionOf(), "is_open 原地变化必须改变版本号")
+
+        assertEquals(before, versionOf(), "is_open 不进响应，不得改变版本号")
 
         val afterOpen = versionOf()
         repository.saveAll(
             listOf(repository.findById(row.id)!!.apply { closeTime = LocalDateTime.of(2026, 1, 1, 0, 0, 0) }),
         )
-        assertNotEquals(afterOpen, versionOf(), "close_time 原地变化必须改变版本号")
+
+        assertEquals(afterOpen, versionOf(), "close_time 不进响应，不得改变版本号")
+    }
+
+    @Test
+    fun digestCoversEveryFieldTheResponseCarries() {
+        // 反向约束：摘要必须覆盖响应体的每一个字段。漏掉任何一个，该字段的变化就不会被察觉，
+        // 客户端会永远拿着旧值（版本号没变 ⇒ 永不重取）。新增 DTO 字段时必须同步加进 encode()，
+        // 这条测试就是那时会失败的地方。
+        val row = insert(catTwo = "旧活动", catThree = "OLD-1", name = "旧关卡名", width = 9, height = 6)
+
+        // 逐个改可空/可变字段，每次都必须让版本号变化
+        val mutations: List<Pair<String, (ArkLevelEntity) -> Unit>> = listOf(
+            "level_id" to { it.levelId = "activities/act1dp/level_act1dp_changed" },
+            "stage_id" to { it.stageId = "act1dp_99" },
+            "cat_one" to { it.catOne = "主题曲" },
+            "cat_two" to { it.catTwo = "新活动" },
+            "cat_three" to { it.catThree = "NEW-1" },
+            "name" to { it.name = "新关卡名" },
+            "width" to { it.width = 20 },
+            "height" to { it.height = 30 },
+        )
+
+        mutations.forEach { (field, mutate) ->
+            val before = versionOf()
+            repository.saveAll(listOf(repository.findById(row.id)!!.apply(mutate)))
+            assertNotEquals(before, versionOf(), "$field 出现在响应里，其变化必须改变版本号")
+        }
     }
 
     @Test

@@ -11,6 +11,11 @@ import org.junit.jupiter.api.Test
  * 这一层是「内容寻址 URL + 长缓存」成立的前提，两条约束各自对应一类真实故障：
  * - `v` 不校验格式 → 外部可用任意字符串制造无限多的 cache key（缓存键稀释）；
  * - 查询串不校验规范形态 → 同一份内容被写成多个 key，WAF 回源次数被放大。
+ *
+ * 关于布尔参数的**取值**范围：本类只处理「已解析出的 Boolean + 原始查询串」，取值合法性由 Spring 的
+ * `StringToBooleanConverter` 决定（接受 `true/false/on/off/yes/no/1/0`，不区分大小写），其余值报错。
+ * 因此这里对数值/缩写写法只断言「非规范写法 ⇒ 短缓存」，不假设它们会失败——PR #247 评审曾误判
+ * `lite=1` 会 400，实测为 200 且语义正确（见方案 §10 第 10 条）。
  */
 class LevelCachePolicyTest {
 
@@ -18,6 +23,28 @@ class LevelCachePolicyTest {
 
     private fun control(v: String? = version, query: String? = "v=$version", lite: Boolean = false, withSize: Boolean = false) =
         LevelCachePolicy.cacheControl(v, version, query, lite, withSize)
+
+    @Test
+    fun nonCanonicalBooleanSpellingsFallBackToShortCache() {
+        // 这些写法都能被 Spring 正确解析成 Boolean（1/on/yes 为 true，0/off/no 为 false），
+        // 因而服务端语义上等价于规范写法——但因为它们各自是 WAF/浏览器里的独立缓存条目，
+        // 只给短缓存，防止缓存键被稀释。注意：断言的是「短缓存」，不是「报错」。
+        listOf(
+            "v=$version&lite=1" to true,
+            "v=$version&lite=on" to true,
+            "v=$version&lite=yes" to true,
+            "v=$version&lite=TRUE" to true,
+            "v=$version&lite=0" to false,
+            "v=$version&lite=off" to false,
+            "v=$version&withSize=1" to false,
+        ).forEach { (query, lite) ->
+            assertEquals(
+                LevelCachePolicy.SHORT,
+                LevelCachePolicy.cacheControl(version, version, query, lite, false),
+                "非规范布尔写法不应进入 immutable 通道：$query",
+            )
+        }
+    }
 
     @Test
     fun canonicalQueryOmitsFalseSwitches() {

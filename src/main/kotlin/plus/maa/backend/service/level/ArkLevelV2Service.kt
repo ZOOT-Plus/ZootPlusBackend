@@ -31,7 +31,6 @@ internal const val LITE_WINDOW_MONTHS = 3
  *    长期脏数据。
  * 2. **`lite` 与 full 的行集合不同**，各有独立版本号（共用会让彼此无谓失效）；`withSize` 只决定是否
  *    携带 `width`/`height`，不改变行集合，因此与同变体的 no-size 天然共用版本号（同一份行数据算出）。
- *
  * 缓存：Caffeine（与现有 `arkLevelInfos` 同规格，`expireAfterWrite=300s`），缓存名由 [CacheConfig] 兜底注册，
  * 不依赖外部配置是否同步更新。同步任务最快 10 分钟才有
  * 新数据，5 分钟缓存最多让客户端晚 5 分钟看到；且 `/version` 与内容端点共用同一批缓存条目，
@@ -85,18 +84,21 @@ class ArkLevelV2Service(
         /**
          * 对行集合算内容摘要（32 位 md5 hex）。
          *
-         * 摘要**必须覆盖 `ArkLevelInfoV2` 的每一个字段**：版本号相同即承诺内容相同，客户端据此长期
-         * 缓存；漏掉某个字段就会让该字段的变化不被察觉，客户端永远拿着旧值。因此新增字段时必须同步
-         * 加到这里（`ArkLevelV2ServiceTest` 有逐字段的敏感性断言守着）。
+         * 摘要的语义是「**响应体**相同 ⇒ 版本号相同」：客户端据此把 `?v=<版本>` 当不可变资源长期缓存，
+         * 所以摘要必须**恰好覆盖 `ArkLevelInfoV2` 的字段**，多一个少一个都是缺陷——
+         * - 少一个：该字段的变化不被察觉，客户端永远拿着旧值（版本号没变 ⇒ 永不重取）；
+         * - 多一个：字段变化时响应体逐字节相同，版本号却变了，全量客户端白重下整份 payload，
+         *   且 ETag 条件请求从 304 退化成 200。`isOpen`/`closeTime` 正属此类（见下）。
          *
-         * 还包含 `isOpen`/`closeTime`：这两列会被开放状态跑批**原地改写而不产生新行**，是仅有的「行集合
-         * 不变但数据变了」的情形。代价是每次活动开闭都会让全量客户端各重下一次，但这类变化一天最多两次，
-         * 远小于「漏掉变化」的风险。
+         * 因此新增 DTO 字段时必须同步加到这里，`digestCoversEveryFieldTheResponseCarries` 会在漏加时失败。
          *
-         * 库里的 NULL 与空串按响应体的口径一并归一成空串（DTO 映射也是这么做的）：摘要承诺的是「响应体
-         * 相同」而非「库里的字节相同」，不归一化会让这类无感差异白白让所有客户端重下一次。
+         * 不含 `isOpen`/`closeTime`：这两列是服务端内部状态（只有 `CopilotScoreRefreshTask` 使用），
+         * 不出现在任何响应变体里，改它们不改变响应体。
          *
-         * **不含 `updatedAt`**：它不出现在响应里，且存量回填会一次性改动全部行，把它算进去只会让所有
+         * 库里的 NULL 与空串按响应体的口径一并归一成空串（DTO 映射也是这么做的）：不归一化会让这类
+         * 无感差异白白让所有客户端重下一次。
+         *
+         * **不含 `updatedAt`**：同样不出现在响应里，且存量回填会一次性改动全部行，把它算进去只会让所有
          * 客户端的本地缓存失效一次。
          *
          * 行顺序参与摘要，因此调用方取行必须带确定性排序（[ArkLevelRepository.findAllOrdered] 等）。
@@ -109,6 +111,12 @@ class ArkLevelV2Service(
             return md5.digest().joinToString("") { "%02x".format(it) }
         }
 
+        /**
+         * 把一行的「响应可见字段」拼成无歧义的一段文本。
+         *
+         * 字段清单**必须与 `ArkLevelInfoV2` 一致**：`width`/`height` 虽然在 no-size 变体里被省略，
+         * 但它们仍是该 DTO 的字段（`withSize=true` 时会返回），故保留。
+         */
         private fun encode(row: ArkLevelEntity): String = buildString {
             fun field(value: Any?) {
                 append(value ?: "")
@@ -122,8 +130,6 @@ class ArkLevelV2Service(
             field(row.name)
             field(row.width)
             field(row.height)
-            field(row.isOpen)
-            field(row.closeTime)
         }
     }
 }

@@ -41,16 +41,25 @@ class CacheConfigTest {
 
     @Test
     fun doesNotTouchExistingCachesWhenAppending() {
-        // setCacheNames 是「只增不删」但不区分已存在项：传整个名单会把现有缓存对象全部重建。
-        // 这里锁住「只传缺失的那一个名字」这一实现细节——否则将来有人顺手改成传全量名单，
-        // 就会在启动时把已注册的自定义缓存（registerCustomCache）覆盖掉。
-        val manager = staticManager("arkLevel", name)
-        val before = manager.getCache("arkLevel")
+        // 针对「setCacheNames 会替换整个名单、把既有缓存全部摘除」这一误判的正面证据：
+        // Spring 的 javadoc 明确「replaces existing caches of the given names ... but does not remove
+        // unrelated existing caches」，实现也只是逐个 put + 置 dynamic=false，不清空 cacheMap。
+        // 这里对意见点名的三个缓存名逐个断言**对象未被重建**（assertSame，而非只看名字还在）
+        // ——对象被重建的话，运行中的缓存条目会静默丢失，是比「名字消失」更隐蔽的故障。
+        val existing = listOf("arkLevel", "arkLevelInfos", "copilotPage")
+        val manager = staticManager(*existing.toTypedArray())
+        val before = existing.associateWith { manager.getCache(it) }
 
         customizer().customize(manager)
 
-        assertSame(before, manager.getCache("arkLevel"), "已存在的缓存对象不应被重建")
-        assertNotNull(manager.getCache(name))
+        existing.forEach { cacheName ->
+            assertSame(before[cacheName], manager.getCache(cacheName), "既有缓存 $cacheName 的对象不应被重建")
+        }
+        assertNotNull(manager.getCache(name), "新缓存名应已补上")
+        assertTrue(
+            manager.cacheNames!!.containsAll(existing + name),
+            "补登记后名单应同时含既有名字与新名字，实际 ${manager.cacheNames}",
+        )
     }
 
     @Test

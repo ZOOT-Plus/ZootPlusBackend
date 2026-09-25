@@ -31,18 +31,12 @@ class FlywayWiringTest {
     fun migrationFilesAreVersionedSequentiallyFromOne() {
         // Flyway 要求版本号严格递增且不重复；顺序错乱会让迁移在这台机器上能跑、在另一台上跳过。
         // 已发布的迁移只增不改，故这里只断言「从 1 开始、连续、无重复」。
-        val migrations = Files.list(Path.of("src/main/resources/db/migration")).use { stream ->
-            stream.map { it.fileName.toString() }
-                .filter { it.startsWith("V") && it.endsWith(".sql") }
-                .sorted()
-                .toList()
-        }
-
-        val versions = migrations.map { it.substringAfter("V").substringBefore("__") }
+        val migrations = migrationFileNames(Path.of("src/main/resources/db/migration"))
         assertTrue(migrations.isNotEmpty(), "迁移目录不应为空")
+
         assertEquals(
-            (1..migrations.size).map(Int::toString),
-            versions,
+            (1..migrations.size).toList(),
+            migrationVersions(migrations),
             "版本号应为从 1 开始的连续整数，实际 $migrations",
         )
         // 只追加不修改已发布版本：文件名的描述部分不得重复
@@ -52,6 +46,48 @@ class FlywayWiringTest {
             "迁移描述不得重复，实际 $migrations",
         )
     }
+
+    @Test
+    fun migrationOrderingHandlesDoubleDigitVersions() {
+        // 直接锁住这条意见指出的缺陷：文件名字典序会把 V10 排在 V2 之前（"V10__" < "V2__"），
+        // 于是加入第 10 个迁移时，「版本号连续」的断言会误报失败——而 Flyway 自身按数值处理，
+        // 排序依据必须与它一致。用临时目录构造 V1/V2/V10 复现该场景，不依赖仓库当前恰好只有两个迁移。
+        val dir = Files.createTempDirectory("flyway-migrations").also { tmp ->
+            listOf("V1__init.sql", "V2__add_column.sql", "V10__tenth.sql").forEach { name ->
+                Files.createFile(tmp.resolve(name))
+            }
+        }
+        try {
+            val migrations = migrationFileNames(dir)
+
+            // 字典序下的原始顺序：V10 会跑到最前面，这正是缺陷的成因（'0' < '_'，故 "V10__" 排在 "V1__" 前）
+            assertEquals(
+                listOf("V10__tenth.sql", "V1__init.sql", "V2__add_column.sql"),
+                migrations.sorted(),
+                "前提：文件名字典序确实把 V10 排在 V1/V2 之前（否则本测试失去意义）",
+            )
+            assertEquals(listOf(1, 2, 10), migrationVersions(migrations), "版本号必须按数值排序，不能按文件名")
+        } finally {
+            Files.walk(dir).sorted(Comparator.reverseOrder()).forEach(Files::delete)
+        }
+    }
+
+    /** 迁移目录下的 SQL 文件名（不排序，排序交给 [migrationVersions]）。 */
+    private fun migrationFileNames(dir: Path): List<String> = Files.list(dir).use { stream ->
+        stream.map { it.fileName.toString() }
+            .filter { it.startsWith("V") && it.endsWith(".sql") }
+            .toList()
+    }
+
+    /**
+     * 解析并按**数值**排序迁移版本号（与 Flyway 的排序依据一致）。
+     *
+     * 用 `toIntOrNull`：非数字版本号（如 `V2_1__x.sql`）得到 null，让调用方的断言失败并带上原始文件名，
+     * 比 `toInt()` 直接抛异常更可读。
+     */
+    private fun migrationVersions(migrations: List<String>): List<Int?> = migrations
+        .map { it.substringAfter("V").substringBefore("__").toIntOrNull() }
+        .sortedBy { it }
 
     @Test
     fun updatedAtMigrationDoesNotDefaultTheColumn() {
