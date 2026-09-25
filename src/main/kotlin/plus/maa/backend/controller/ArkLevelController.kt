@@ -9,6 +9,7 @@ import org.springframework.http.HttpHeaders
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.context.request.ServletWebRequest
 import plus.maa.backend.controller.response.MaaResult
 import plus.maa.backend.controller.response.MaaResult.Companion.success
 import plus.maa.backend.controller.response.copilot.ArkLevelInfo
@@ -47,6 +48,10 @@ class ArkLevelController(
      * 参数顺序与写法固定在 `v` → `lite` → `withSize`，值为 false 的开关**省略不写**：WAF 把查询串计入
      * 缓存键且不做归一化（实测 `?a=1&b=2` 与 `?b=2&a=1` 是两个独立条目），放任变体写法会让同一份内容
      * 在浏览器与 WAF 里各占多份。写法不规范的请求仍返回正确内容，只是走短缓存，不进 immutable 通道。
+     *
+     * 返回可空：请求带 `If-None-Match` 且与当前版本一致时，[ServletWebRequest.checkNotModified] 会把响应
+     * 置为 304 并返回 true，此处返回 null 让 Spring 不写响应体（若照常返回 `MaaResult`，304 也会带 body）。
+     * 返回类型可空**不影响**生成的 OpenAPI——实测 schema 仍是 `MaaResultLevelPayload`、响应仍是 `default`。
      */
     @GetMapping("/arknights/level/v2")
     @ApiResponse(description = "关卡数据（版本化缓存）")
@@ -55,16 +60,17 @@ class ArkLevelController(
         @RequestParam(required = false) v: String?,
         @RequestParam(defaultValue = "false") lite: Boolean,
         @RequestParam(defaultValue = "false") withSize: Boolean,
-    ): MaaResult<LevelPayload> {
+    ): MaaResult<LevelPayload>? {
         val payload = arkLevelV2Service.payload(lite, withSize)
-        // 弱 ETag：版本号本身就是内容摘要，可让中间层用条件请求换 304（省一次 660K 的响应体）。
-        // 用弱校验而非强校验，理由与 MaaEtagHeaderFilterRegistrationBean 一致：响应会被容器动态压缩，
-        // 强 ETag 在「同一 URL 有多种内容编码」时不成立。
-        response.setHeader(HttpHeaders.ETAG, "W/\"${payload.version}\"")
         response.setHeader(
             HttpHeaders.CACHE_CONTROL,
             LevelCachePolicy.cacheControl(v, payload.version, request.queryString, lite, withSize),
         )
+        // 版本号本身就是内容摘要，直接当 ETag 用（零成本，无需像 ShallowEtagHeaderFilter 那样把整个
+        // 响应体哈希一遍）。用弱校验：响应会被容器动态压缩，强 ETag 在「同一 URL 有多种内容编码」时
+        // 不成立。
+        val notModified = ServletWebRequest(request, response).checkNotModified("W/\"${payload.version}\"")
+        if (notModified) return null
         return success(payload)
     }
 
