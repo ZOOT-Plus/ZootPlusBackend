@@ -1,0 +1,55 @@
+name: Test
+
+on:
+  pull_request:
+    branches:
+      - dev
+      - main
+  push:
+    branches:
+      - dev
+      - main
+  workflow_dispatch:
+
+# 同一分支的新推送取消仍在跑的同 workflow 运行，避免排队堆积
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 25
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      # 只跑离线测试：数据库用 zonky embedded-postgres（纯 JVM 实现，自解压运行 PG 二进制，
+      # 不需要 docker 或外部服务），因此无需 postgres/valkey service 容器。
+      #
+      # -PexcludeIntegration 排除 3 个需要外部环境的测试类（真实 GitHub API、完整 Spring 配置）。
+      # 排除后剩 18 个类 / 288 例，实测在干净 dev 上全绿、约 20 秒。
+      - name: Run tests
+        run: ./gradlew test -PexcludeIntegration
+
+      - name: Check code style
+        run: ./gradlew ktlintCheck
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-report
+          path: build/reports/tests/test/
+          if-no-files-found: ignore
