@@ -13,6 +13,7 @@ import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.Pageable
 import org.springframework.stereotype.Repository
 import plus.maa.backend.repository.entity.ArkLevelEntity
+import java.time.LocalDateTime
 
 /**
  * ark_level 表仓储。
@@ -29,8 +30,8 @@ class ArkLevelRepository(
     interface ArkLevelDao {
         @SqlUpdate(
             """
-            INSERT INTO ark_level (level_id, stage_id, sha, cat_one, cat_two, cat_three, name, width, height, is_open, close_time)
-            VALUES (:levelId, :stageId, :sha, :catOne, :catTwo, :catThree, :name, :width, :height, :isOpen, :closeTime)
+            INSERT INTO ark_level (level_id, stage_id, sha, cat_one, cat_two, cat_three, name, width, height, is_open, close_time, updated_at)
+            VALUES (:levelId, :stageId, :sha, :catOne, :catTwo, :catThree, :name, :width, :height, :isOpen, :closeTime, :updatedAt)
             """,
         )
         @GetGeneratedKeys("id")
@@ -40,8 +41,8 @@ class ArkLevelRepository(
         /** 显式指定 id 的插入（基线：save 对 id 非 0 且不存在时按给定值插入，不推进序列）。 */
         @SqlUpdate(
             """
-            INSERT INTO ark_level (id, level_id, stage_id, sha, cat_one, cat_two, cat_three, name, width, height, is_open, close_time)
-            VALUES (:id, :levelId, :stageId, :sha, :catOne, :catTwo, :catThree, :name, :width, :height, :isOpen, :closeTime)
+            INSERT INTO ark_level (id, level_id, stage_id, sha, cat_one, cat_two, cat_three, name, width, height, is_open, close_time, updated_at)
+            VALUES (:id, :levelId, :stageId, :sha, :catOne, :catTwo, :catThree, :name, :width, :height, :isOpen, :closeTime, :updatedAt)
             """,
         )
         @GetGeneratedKeys("id")
@@ -52,12 +53,16 @@ class ArkLevelRepository(
          * id != 0 时显式插入或 ON CONFLICT (id) DO UPDATE 全列覆盖——由数据库决定插入或更新。
          * 返回各行 id（与 entities 顺序一致），供调用方回填自增 id。
          * 新增字段只需在此 SQL 加列，无需改 Kotlin 绑定代码。
+         *
+         * `updated_at` 只在 INSERT 列清单里：DO UPDATE SET 里刻意不列它。开放状态跑批
+         * （ArkLevelService.updateLevelsOfTypeInBatch）读整页 → 改 is_open → 全列 upsert 写回，
+         * 若把该列放进 SET，每轮都会把整批活动关卡的 updated_at 续期，lite 变体的窗口判据直接失效。
          */
         @SqlBatch(
             """
-            INSERT INTO ark_level (id, level_id, stage_id, sha, cat_one, cat_two, cat_three, name, width, height, is_open, close_time)
+            INSERT INTO ark_level (id, level_id, stage_id, sha, cat_one, cat_two, cat_three, name, width, height, is_open, close_time, updated_at)
             VALUES (COALESCE(NULLIF(:id, 0), nextval(pg_get_serial_sequence('ark_level', 'id'))),
-                    :levelId, :stageId, :sha, :catOne, :catTwo, :catThree, :name, :width, :height, :isOpen, :closeTime)
+                    :levelId, :stageId, :sha, :catOne, :catTwo, :catThree, :name, :width, :height, :isOpen, :closeTime, :updatedAt)
             ON CONFLICT (id) DO UPDATE SET
                 level_id = EXCLUDED.level_id,
                 stage_id = EXCLUDED.stage_id,
@@ -291,6 +296,89 @@ class ArkLevelRepository(
             )
             updates.forEach { (id, catTwo) ->
                 batch.bind("catTwo", catTwo).bind("id", id).add()
+            }
+            batch.execute().sum()
+        }
+    }
+
+    /**
+     * 全量关卡查询，顺序为 `stage_id, id`。
+     *
+     * `/arknights/level/v2` 的版本摘要按查询结果顺序拼接，故必须有**确定性**顺序：
+     * 无 ORDER BY 时 PG 的返回顺序随执行计划变化，同一份数据会算出两个版本号，
+     * 让客户端把所有内容误判为「已更新」并重新下载。
+     */
+    fun findAllOrdered(): List<ArkLevelEntity> {
+        return jdbi.withHandleUnchecked { handle ->
+            handle.createQuery("SELECT * FROM ark_level ORDER BY stage_id, id")
+                .mapTo<ArkLevelEntity>()
+                .list()
+        }
+    }
+
+    /**
+     * 指定分类下在 [since] 之后同步进来的行（`/arknights/level/v2` 的 lite 变体）。
+     *
+     * 用 `>=`：边界值算窗口内，与方案 §4 的判据一致。
+     * `updated_at IS NULL`（存量行尚未回填）的行不会被命中——宁可少返，不可把老数据当新数据。
+     */
+    fun findAllUpdatedSince(catOne: String, since: LocalDateTime): List<ArkLevelEntity> {
+        return jdbi.withHandleUnchecked { handle ->
+            handle.createQuery(
+                """
+                SELECT * FROM ark_level
+                WHERE cat_one = :catOne AND updated_at >= :since
+                ORDER BY stage_id, id
+                """.trimIndent(),
+            )
+                .bind("catOne", catOne)
+                .bind("since", since)
+                .mapTo<ArkLevelEntity>()
+                .list()
+        }
+    }
+
+    /**
+     * `updated_at` 仍为 NULL 的行数（存量回填的廉价门禁：0 行即表示无需触网）。
+     */
+    fun countNullUpdatedAt(): Long {
+        return jdbi.withHandleUnchecked { handle ->
+            handle.createQuery("SELECT COUNT(*) FROM ark_level WHERE updated_at IS NULL")
+                .mapTo(Long::class.java)
+                .one()
+        }
+    }
+
+    /** `updated_at` 仍为 NULL 的行，按 id 升序（存量回填的输入）。 */
+    fun findAllNullUpdatedAt(): List<ArkLevelEntity> {
+        return jdbi.withHandleUnchecked { handle ->
+            handle.createQuery("SELECT * FROM ark_level WHERE updated_at IS NULL ORDER BY id")
+                .mapTo<ArkLevelEntity>()
+                .list()
+        }
+    }
+
+    /**
+     * 批量回填 `updated_at`，**仅对仍为 NULL 的行生效**。
+     *
+     * 条件（`updated_at IS NULL`）是必要的：回填与同步任务可能并发，轮询期间新同步进来的行
+     * 已由 INSERT 写入了真实时刻，若不设条件就会被回填覆盖成「窗口内/窗口外」的判定值。
+     * 语义与 [updateCatTwoByIds] 的条件更新一致，相当于一次 DB 层的 compare-and-set。
+     *
+     * @param updates id 与要写入的时刻
+     * @return 实际受影响行数；与 [updates] 的差额即已被 INSERT 抢先写入 N 行
+     */
+    fun updateUpdatedAtByIds(updates: List<Pair<Long, LocalDateTime>>): Int {
+        if (updates.isEmpty()) return 0
+        return jdbi.withHandleUnchecked { handle ->
+            val batch = handle.prepareBatch(
+                """
+                UPDATE ark_level SET updated_at = :updatedAt
+                WHERE id = :id AND updated_at IS NULL
+                """.trimIndent(),
+            )
+            updates.forEach { (id, updatedAt) ->
+                batch.bind("updatedAt", updatedAt).bind("id", id).add()
             }
             batch.execute().sum()
         }

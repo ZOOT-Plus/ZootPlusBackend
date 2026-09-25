@@ -66,6 +66,10 @@ dependencies {
     }
     testImplementation(zonkyBinaryArtifact())
 
+    // Flyway：Spring Boot 4 把自动配置拆到了独立模块，只有 flyway-core 在 classpath 上时
+    // FlywayAutoConfiguration 不会被加载——迁移文件存在但从不执行（表现为应用起得来、表却不存在）。
+    // spring-boot-flyway 由 Boot 的 BOM 管版本。
+    implementation("org.springframework.boot:spring-boot-flyway")
     implementation("org.flywaydb:flyway-core")
     implementation("org.flywaydb:flyway-database-postgresql")
 

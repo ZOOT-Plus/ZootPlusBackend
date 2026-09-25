@@ -6,6 +6,11 @@ spring:
     password: admin
   flyway:
     enabled: true
+    # 本库是被 Flyway 接管前就存在的老库（V1__init.sql 是既有结构的 baseline 快照，全部
+    # create ... if not exists）。首次上线时库非空且没有 schema history 表，不 baseline 会直接启动失败；
+    # 打开后 Flyway 建 history 表并把 V1 标记为已应用，从 V2 起正常增量执行。
+    # 对应 application-template.yml 里注释掉的两行，含义相同。
+    baseline-on-migrate: true
   profiles:
     active: dev
   servlet:
@@ -17,8 +22,10 @@ spring:
   freemarker:
     check-template-location: false
   # 缓存配置，使用caffeine缓存框架，缓存时长为5分钟，最大缓存数量500
+  # 注意：声明了 cache-names 后 CacheManager 不再动态创建缓存，@Cacheable 用到的新名字必须在此登记，
+  # 否则启动后访问该端点会抛 Cannot find cache named '...'
   cache:
-    cache-names: arkLevel, arkLevelInfos, copilotPage
+    cache-names: arkLevel, arkLevelInfos, copilotPage, arkLevelSnapshotsV2
     type: caffeine
     caffeine:
       spec: maximumSize=500,expireAfterWrite=300s

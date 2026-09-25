@@ -13,6 +13,7 @@ import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import plus.maa.backend.service.level.ArkLevelService
 import plus.maa.backend.service.level.LevelNameRepairSource
+import plus.maa.backend.service.level.UpdatedAtBackfillSource
 import java.util.concurrent.atomic.AtomicBoolean
 
 @Component
@@ -23,6 +24,7 @@ class ArkLevelSyncTask(
     private val levelSyncing = AtomicBoolean(false)
     private val openStatusSyncing = AtomicBoolean(false)
     private val nameRepairing = AtomicBoolean(false)
+    private val updatedAtBackfilling = AtomicBoolean(false)
 
     /**
      * 地图数据同步定时任务，每10分钟执行一次
@@ -54,6 +56,9 @@ class ArkLevelSyncTask(
             // 需要后续重试才能补上。放在 finally 里，开放状态更新失败也不影响回填执行。
             // 挂在硬编码的既有任务下，保证不依赖默认禁用的 maa-copilot.task-cron.* 配置项。
             arkLevelService.repairMissingActivityNames(LevelNameRepairSource.DAILY)
+            // 存量 updated_at 的兜底回填（正常情况下启动时已完成，此后每次只花一条 COUNT 查询）：
+            // 覆盖「启动那次因网络/API 失败而没做完」的情况，否则那些行永远不会进入 lite 窗口。
+            arkLevelService.backfillUpdatedAt(UpdatedAtBackfillSource.DAILY)
         }
     }
 
@@ -66,6 +71,16 @@ class ArkLevelSyncTask(
     @EventListener(ApplicationReadyEvent::class)
     fun repairMissingActivityNamesOnStartup() = atomRun(nameRepairing) {
         arkLevelService.repairMissingActivityNames(LevelNameRepairSource.STARTUP)
+    }
+
+    /**
+     * 应用启动后就绪回填一次存量行的 `updated_at`（`/arknights/level/v2` 的 lite 窗口依赖它）。
+     *
+     * 与活动名回填同样是幂等的：完成后每次启动只花一条 COUNT 查询，无待回填行则不触网。
+     */
+    @EventListener(ApplicationReadyEvent::class)
+    fun backfillUpdatedAtOnStartup() = atomRun(updatedAtBackfilling) {
+        arkLevelService.backfillUpdatedAt(UpdatedAtBackfillSource.STARTUP)
     }
 
     private fun atomRun(atom: AtomicBoolean, block: suspend CoroutineScope.() -> Unit): Boolean {
