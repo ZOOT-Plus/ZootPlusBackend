@@ -17,7 +17,8 @@ import java.time.LocalDateTime
  * 覆盖方法：findByStageId / findAllByStageIds / findByLevelId / findAllOpenLevels / insertEntity /
  * findById / deleteById / existsById / save / findByLevelIdFuzzy / queryLevelByKeyword /
  * findAllShaBy / findAllByCatOne / saveAll / count（继承）/
- * countBlankCatTwoByCatOne / findAllBlankCatTwoByCatOne / updateCatTwoByIds。
+ * countBlankCatTwoByCatOne / findAllBlankCatTwoByCatOne / updateCatTwoByIds /
+ * findAllOrdered / findAllUpdatedSince / countNullUpdatedAt / findAllNullUpdatedAt / updateUpdatedAtByIds。
  *
  * 未覆盖点与基线记录：
  * - 唯一约束冲突：ark_level 表（V1__init.sql）无任何唯一约束（level_id/stage_id/name 均为普通索引），
@@ -42,6 +43,7 @@ class ArkLevelRepositoryTest : TestDbSupport() {
         height: Int = 0,
         isOpen: Boolean? = null,
         closeTime: LocalDateTime? = null,
+        updatedAt: LocalDateTime? = LocalDateTime.now(),
     ): ArkLevelEntity = ArkLevelEntity(
         levelId = levelId,
         stageId = stageId,
@@ -54,6 +56,7 @@ class ArkLevelRepositoryTest : TestDbSupport() {
         height = height,
         isOpen = isOpen,
         closeTime = closeTime,
+        updatedAt = updatedAt,
     )
 
     // ------------------------------------------------------------------ findByStageId
@@ -628,5 +631,138 @@ class ArkLevelRepositoryTest : TestDbSupport() {
 
         assertEquals(0, repository.updateCatTwoByIds(emptyList()))
         assertEquals("", repository.findById(1L)!!.catTwo)
+    }
+
+    // ------------------------------------------------------------------ updated_at
+
+    @Test
+    fun insertEntityWritesUpdatedAtFromEntityDefault() {
+        // 不显式传 updatedAt：新行走实体构造时刻（lite 窗口依赖它，缺失会让新行永远进不了 lite）
+        val before = LocalDateTime.now().minusSeconds(1)
+        val entity = repository.insertEntity(ArkLevelEntity(levelId = "act-1", stageId = "act-1", sha = "sha-1"))
+
+        val loaded = repository.findById(entity.id)!!
+        assertNotNull(loaded.updatedAt, "新行的 updated_at 不应为 NULL")
+        assertTrue(loaded.updatedAt!!.isAfter(before), "应取构造时刻，实测 ${loaded.updatedAt}")
+    }
+
+    @Test
+    fun insertEntityPersistsExplicitUpdatedAt() {
+        val ts = LocalDateTime.of(2026, 1, 2, 3, 4, 5, 678_000_000)
+        val entity = repository.insertEntity(newLevel(levelId = "act-1", updatedAt = ts))
+
+        assertEquals(ts, repository.findById(entity.id)!!.updatedAt)
+    }
+
+    @Test
+    fun insertEntityNullUpdatedAtRoundTripsAsNull() {
+        // 存量行（迁移后未回填）的形态：NULL 必须能读回，否则 mapTo 会在非空属性上炸掉
+        val entity = repository.insertEntity(newLevel(levelId = "act-1", updatedAt = null))
+
+        assertNull(repository.findById(entity.id)!!.updatedAt)
+    }
+
+    @Test
+    fun upsertDoesNotRefreshUpdatedAt() {
+        // 锁死 V2 方案的核心约束：开放状态跑批走 saveAll 全列 upsert，SET 列表里若带上 updated_at，
+        // 每轮都会把整批活动关卡续期，lite 从 2.2K 膨胀到 49.9K。
+        // 这里连调用方显式改了值也一并锁住——防护在 SQL 层，不在调用方自觉。
+        val original = LocalDateTime.of(2026, 1, 2, 3, 4, 5, 0)
+        val inserted = repository.insertEntity(newLevel(levelId = "act-1", isOpen = true, updatedAt = original))
+
+        val attached = repository.findById(inserted.id)!!
+        attached.isOpen = false
+        attached.updatedAt = LocalDateTime.now() // 即使调用方给了一个新值
+        repository.saveAll(listOf(attached))
+
+        assertEquals(original, repository.findById(inserted.id)!!.updatedAt, "upsert 不得改写 updated_at")
+        assertEquals(false, repository.findById(inserted.id)!!.isOpen, "其余列照旧全列覆盖")
+    }
+
+    @Test
+    fun upsertHandlesNullUpdatedAtWithoutFailing() {
+        // 生产上必然出现的中间态：迁移后、回填完成前，开放状态跑批（updateLevelsOfTypeInBatch）
+        // 会把 updated_at 仍是 NULL 的行整页 upsert 回来。这里锁死该路径不报错，且 NULL 不被写成
+        // 某个伪造值——否则回填的「只处理 NULL 行」判据会失效，这些行永远进不了 lite 窗口。
+        val entity = repository.insertEntity(newLevel(levelId = "act-1", catOne = "活动关卡", updatedAt = null))
+        assertNull(repository.findById(entity.id)!!.updatedAt)
+
+        val page = repository.findById(entity.id)!!
+        page.isOpen = true
+        repository.saveAll(listOf(page))
+
+        val loaded = repository.findById(entity.id)!!
+        assertEquals(true, loaded.isOpen, "其余列应被更新")
+        assertNull(loaded.updatedAt, "NULL 必须保持 NULL，等待回填")
+        assertEquals(1L, repository.countNullUpdatedAt(), "该行仍应被回填门禁统计到")
+    }
+
+    @Test
+    fun findAllOrderedIsOrderedByStageIdThenId() {
+        // 版本摘要按该顺序拼接，顺序不确定会让同一份数据算出两个版本号
+        repository.insertEntity(newLevel(levelId = "b", stageId = "st-2"))
+        repository.insertEntity(newLevel(levelId = "a", stageId = "st-1"))
+        repository.insertEntity(newLevel(levelId = "c", stageId = "st-2"))
+
+        val rows = repository.findAllOrdered()
+        assertEquals(listOf("st-1", "st-2", "st-2"), rows.map { it.stageId })
+        assertEquals(listOf(2L, 1L, 3L), rows.map { it.id }, "stage_id 相同时按 id 升序（1 与 3 是 st-2 的两行）")
+    }
+
+    @Test
+    fun findAllUpdatedSinceFiltersByCatOneAndWindow() {
+        val cutoff = LocalDateTime.of(2026, 6, 25, 0, 0, 0)
+        val inWindow = repository.insertEntity(
+            newLevel(levelId = "act-new", catOne = "活动关卡", updatedAt = cutoff.plusDays(1)),
+        )
+        repository.insertEntity(newLevel(levelId = "act-old", catOne = "活动关卡", updatedAt = cutoff.minusDays(1)))
+        repository.insertEntity(newLevel(levelId = "main-new", catOne = "主题曲", updatedAt = cutoff.plusDays(1)))
+        repository.insertEntity(newLevel(levelId = "act-null", catOne = "活动关卡", updatedAt = null))
+        val onBoundary = repository.insertEntity(newLevel(levelId = "act-edge", catOne = "活动关卡", updatedAt = cutoff))
+
+        val rows = repository.findAllUpdatedSince("活动关卡", cutoff)
+        assertEquals(setOf(inWindow.id, onBoundary.id), rows.map { it.id }.toSet(), "含边界值，不含其它分类与 NULL")
+        assertEquals(listOf(inWindow.id, onBoundary.id), rows.map { it.id }, "按 stage_id, id 排序")
+    }
+
+    @Test
+    fun countNullUpdatedAtAndFindAllNullUpdatedAt() {
+        assertEquals(0L, repository.countNullUpdatedAt())
+        assertTrue(repository.findAllNullUpdatedAt().isEmpty())
+
+        val blank = repository.insertEntity(newLevel(levelId = "act-1", updatedAt = null))
+        val blankNull = repository.insertEntity(newLevel(levelId = "act-2", updatedAt = null))
+        repository.insertEntity(newLevel(levelId = "act-3", updatedAt = LocalDateTime.now()))
+
+        assertEquals(2L, repository.countNullUpdatedAt())
+        assertEquals(listOf(blank.id, blankNull.id), repository.findAllNullUpdatedAt().map { it.id })
+    }
+
+    @Test
+    fun updateUpdatedAtByIdsOnlyFillsNullRows() {
+        // 并发防护：轮询期间新同步进来的行已由 INSERT 写入真实时刻，回填不得覆盖它
+        val ts = LocalDateTime.of(2026, 1, 2, 3, 4, 5, 0)
+        val blank = repository.insertEntity(newLevel(levelId = "act-1", updatedAt = null))
+        val filled = repository.insertEntity(newLevel(levelId = "act-2", updatedAt = ts))
+
+        val affected = repository.updateUpdatedAtByIds(
+            listOf(
+                blank.id to ts,
+                9999L to ts,
+                filled.id to LocalDateTime.now(),
+            ),
+        )
+
+        assertEquals(1, affected, "只有 NULL 行被写入；已填行与不存在的行都不计")
+        assertEquals(ts, repository.findById(blank.id)!!.updatedAt)
+        assertEquals(ts, repository.findById(filled.id)!!.updatedAt, "已有值不被覆盖")
+    }
+
+    @Test
+    fun updateUpdatedAtByIdsEmptyListNoOp() {
+        val blank = repository.insertEntity(newLevel(levelId = "act-1", updatedAt = null))
+
+        assertEquals(0, repository.updateUpdatedAtByIds(emptyList()))
+        assertNull(repository.findById(blank.id)!!.updatedAt)
     }
 }

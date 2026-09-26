@@ -102,6 +102,8 @@ class SecurityConfig(
                 "/v3/api-docs/**",
                 "/swagger-ui/**",
                 "/arknights/level",
+                "/arknights/level/v2",
+                "/arknights/level/v2/version",
                 "/copilot/query",
                 "/set/query",
                 "/set/get",
