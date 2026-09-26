@@ -175,7 +175,17 @@ tasks {
 
 tasks {
     test {
-        useJUnitPlatform()
+        useJUnitPlatform {
+            // 标了 @Tag("integration") 的测试需要外部环境（真实 GitHub API、完整配置、网络），CI 无法提供，
+            // 用 -PexcludeIntegration 排除；本地默认不排除，便于开发者按需自查。
+            //
+            // 用 tag 排除而非 --tests 白名单：--tests 在匹配不到任何类时会直接让构建失败
+            // （实测 "No tests found for given includes"），一旦有测试类被重命名/删除，CI 就会以一个
+            // 与代码质量无关的理由变红；excludeTags 匹配不到时是 no-op（实测）。
+            if (project.hasProperty("excludeIntegration")) {
+                excludeTags("integration")
+            }
+        }
     }
 }
 
