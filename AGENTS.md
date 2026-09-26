@@ -36,7 +36,7 @@
 - 基类 `TestDbSupport.kt`：JVM 级单例 embedded PG（多类共享），Flyway 建表（与生产共用 `db/migration`），`@BeforeEach` TRUNCATE 全部业务表 `RESTART IDENTITY CASCADE`
 - 不依赖 Spring 上下文（无 `@SpringBootTest`），repository 测试直接 `XxxRepository(jdbi)` 构造
 - mockk mock 服务依赖（如 `ArkLevelService`），DB 用真实库
-- 测试库选 zonky embedded-postgres（纯 JVM 嵌入式 PG）而非 testcontainers：开发机为 WSL 无 docker
+- 测试库选 zonky embedded-postgres（解压并运行捆绑原生 PG 二进制的 JVM 库）而非 testcontainers：开发机为 WSL 无 docker
 
 ## Flyway
 

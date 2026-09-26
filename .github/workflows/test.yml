@@ -35,8 +35,8 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
 
-      # 只跑离线测试：数据库用 zonky embedded-postgres（纯 JVM 实现，自解压运行 PG 二进制，
-      # 不需要 docker 或外部服务），因此无需 postgres/valkey service 容器。
+      # 只跑离线测试：数据库用 zonky embedded-postgres（JVM 库，自解压运行捆绑的平台原生
+      # PG 二进制，不需要 docker 或外部服务），因此无需 postgres/valkey service 容器。
       #
       # -PexcludeIntegration 排除 3 个需要外部环境的测试类（真实 GitHub API、完整 Spring 配置）。
       # 排除后剩 18 个类 / 288 例，实测在干净 dev 上全绿、约 20 秒。
