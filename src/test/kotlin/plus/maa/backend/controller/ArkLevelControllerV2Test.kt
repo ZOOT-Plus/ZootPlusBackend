@@ -10,12 +10,12 @@ import org.springframework.http.HttpHeaders
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
 import plus.maa.backend.controller.response.MaaResult
-import plus.maa.backend.controller.response.copilot.ArkLevelInfoV2
-import plus.maa.backend.controller.response.copilot.LevelPayload
 import plus.maa.backend.controller.response.copilot.LevelVersions
+import plus.maa.backend.repository.entity.ArkLevelEntity
 import plus.maa.backend.service.level.ArkLevelService
 import plus.maa.backend.service.level.ArkLevelV2Service
 import plus.maa.backend.service.level.LevelCachePolicy
+import plus.maa.backend.service.level.LevelSnapshot
 
 /**
  * [ArkLevelController] 的 v2 端点测试。
@@ -33,20 +33,22 @@ class ArkLevelControllerV2Test {
     private val fullVersion = "11111111111111111111111111111111"
     private val liteVersion = "22222222222222222222222222222222"
 
-    private fun dto(levelId: String) = ArkLevelInfoV2(
+    private fun row(levelId: String) = ArkLevelEntity(
         levelId = levelId,
         stageId = "st-1",
         catOne = "活动关卡",
         catTwo = "活动",
         catThree = "C-1",
         name = "关卡",
+        width = 1,
+        height = 1,
+        updatedAt = null,
     )
 
+    // 缓存键只含 lite：两个变体各一份快照，withSize 由 controller 在缓存之外投影
     private val v2Service = mockk<ArkLevelV2Service> {
-        every { payload(lite = false, withSize = false) } returns LevelPayload(fullVersion, listOf(dto("full")))
-        every { payload(lite = false, withSize = true) } returns LevelPayload(fullVersion, listOf(dto("full")))
-        every { payload(lite = true, withSize = false) } returns LevelPayload(liteVersion, listOf(dto("lite")))
-        every { payload(lite = true, withSize = true) } returns LevelPayload(liteVersion, listOf(dto("lite")))
+        every { snapshot(false) } returns LevelSnapshot(fullVersion, listOf(row("full")))
+        every { snapshot(true) } returns LevelSnapshot(liteVersion, listOf(row("lite")))
     }
 
     /**

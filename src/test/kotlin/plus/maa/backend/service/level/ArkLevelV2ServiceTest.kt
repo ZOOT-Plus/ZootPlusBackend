@@ -40,20 +40,25 @@ class ArkLevelV2ServiceTest : TestDbSupport() {
         ),
     )
 
-    private fun versionOf(lite: Boolean = false, withSize: Boolean = false) = service.payload(lite = lite, withSize = withSize).version
+    private fun versionOf(lite: Boolean = false) = service.snapshot(lite = lite).version
 
     // ------------------------------------------------------------------ 变体与版本号
 
     @Test
-    fun withSizeSharesVersionWithNoSizeVariant() {
+    fun withSizeIsAProjectionOfTheSharedSnapshot() {
         insert()
         insert(levelId = "activities/act1dp/level_act1dp_02", stageId = "act1dp_02")
 
-        assertEquals(versionOf(withSize = false), versionOf(withSize = true), "withSize 不改变行集合，应共用版本号")
-        assertEquals(
-            service.payload(lite = false, withSize = false).levels.size,
-            service.payload(lite = false, withSize = true).levels.size,
-        )
+        // withSize 只是缓存之外的投影：同一快照投影出的两份响应必然同版本号、同行集合。
+        // 缓存键只含 lite（见 ArkLevelV2Service 类注释）——若把 withSize 弄回缓存键，
+        // /version（no-size）与内容端点（with-size）会在过渡窗内给出矛盾的版本号。
+        val snapshot = service.snapshot(lite = false)
+        val noSize = snapshot.toPayload(withSize = false)
+        val sized = snapshot.toPayload(withSize = true)
+
+        assertEquals(snapshot.version, noSize.version)
+        assertEquals(snapshot.version, sized.version)
+        assertEquals(noSize.levels.size, sized.levels.size)
     }
 
     @Test
@@ -62,8 +67,8 @@ class ArkLevelV2ServiceTest : TestDbSupport() {
         insert(updatedAt = LocalDateTime.now().minusMonths(6))
 
         assertNotEquals(versionOf(lite = false), versionOf(lite = true))
-        assertEquals(1, service.payload(lite = false, withSize = false).levels.size)
-        assertEquals(0, service.payload(lite = true, withSize = false).levels.size)
+        assertEquals(1, service.snapshot(lite = false).toPayload(withSize = false).levels.size)
+        assertEquals(0, service.snapshot(lite = true).toPayload(withSize = false).levels.size)
     }
 
     @Test
@@ -157,11 +162,11 @@ class ArkLevelV2ServiceTest : TestDbSupport() {
 
     @Test
     fun emptyTableHasWellFormedVersion() {
-        val payload = service.payload(lite = false, withSize = false)
+        val snapshot = service.snapshot(lite = false)
 
-        assertEquals(32, payload.version.length)
-        assertEquals(Regex("^[0-9a-f]{32}$").matches(payload.version), true)
-        assertEquals(emptyList<Any>(), payload.levels)
+        assertEquals(32, snapshot.version.length)
+        assertEquals(Regex("^[0-9a-f]{32}$").matches(snapshot.version), true)
+        assertEquals(emptyList<Any>(), snapshot.rows)
     }
 
     // ------------------------------------------------------------------ 行集合
@@ -178,9 +183,9 @@ class ArkLevelV2ServiceTest : TestDbSupport() {
         insert(levelId = "legion-new", stageId = "legion_new", catOne = "保全派驻", updatedAt = LocalDateTime.now())
         insert(levelId = "act-null", stageId = "act_null", updatedAt = null)
 
-        val lite = service.payload(lite = true, withSize = false).levels
+        val lite = service.snapshot(lite = true).toPayload(withSize = false).levels
         assertEquals(setOf(recent.levelId, nearBoundary.levelId), lite.map { it.levelId }.toSet())
-        assertEquals(6, service.payload(lite = false, withSize = false).levels.size, "full 变体不受窗口与分类影响")
+        assertEquals(6, service.snapshot(lite = false).toPayload(withSize = false).levels.size, "full 变体不受窗口与分类影响")
     }
 
     @Test
@@ -189,7 +194,7 @@ class ArkLevelV2ServiceTest : TestDbSupport() {
         insert(levelId = "a", stageId = "st-1")
         insert(levelId = "c", stageId = "st-2")
 
-        assertEquals(listOf("st-1", "st-2", "st-2"), service.payload(lite = false, withSize = false).levels.map { it.stageId })
+        assertEquals(listOf("st-1", "st-2", "st-2"), service.snapshot(lite = false).toPayload(withSize = false).levels.map { it.stageId })
     }
 
     // ------------------------------------------------------------------ DTO 映射
@@ -198,11 +203,11 @@ class ArkLevelV2ServiceTest : TestDbSupport() {
     fun noSizeVariantDropsWidthHeight() {
         insert(width = 12, height = 8)
 
-        val row = service.payload(lite = false, withSize = false).levels.single()
+        val row = service.snapshot(lite = false).toPayload(withSize = false).levels.single()
         assertNull(row.width)
         assertNull(row.height)
 
-        val sized = service.payload(lite = false, withSize = true).levels.single()
+        val sized = service.snapshot(lite = false).toPayload(withSize = true).levels.single()
         assertEquals(12, sized.width)
         assertEquals(8, sized.height)
     }
@@ -212,7 +217,7 @@ class ArkLevelV2ServiceTest : TestDbSupport() {
         // 与 v1 的 ArkLevelConverter 保持同一口径：库里可空的列在响应里是空串，不是 null
         val row = insert(levelId = "act-1", catTwo = null, catThree = null, name = null)
 
-        val dto = service.payload(lite = false, withSize = false).levels.single()
+        val dto = service.snapshot(lite = false).toPayload(withSize = false).levels.single()
         assertEquals("", dto.catTwo)
         assertEquals("", dto.catThree)
         assertEquals("", dto.name)

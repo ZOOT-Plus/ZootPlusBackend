@@ -403,18 +403,23 @@ class ArkLevelService(
      * 下跌。故按上游 git 历史给存量行分类：
      *
      * 1. 取 3 个月前那个 commit（一次 commits API 调用，`until` 过滤 + 取最新一条）；
-     * 2. 逐级下钻到地图目录，得到那一刻的文件清单；
-     * 3. 行里的 `sha` 列**就是**同步时存下的地图文件 blob sha，直接比对是否出现在老清单里即可判定
-     *    该行是窗口内新增还是 3 个月前就有——**无需下载任何地图文件**（这是相比按文件名重建路径更省的做法）。
+     * 2. 逐级下钻到地图目录，得到那一刻的**文件名清单**；
+     * 3. 按行构造上游文件名（[upstreamFileName]），比对是否出现在老清单里即可判定该行是窗口内新增还是
+     *    3 个月前就有——**无需下载任何地图文件**。
+     *
+     * **必须按文件名而不是 blob sha 判定**：同步对每个新 blob sha 都插入新行且不删旧行（见
+     * [downloadAndSaveLevelDatum] 的过滤条件），文件在边界前被修改过时，库里有同一路径的新旧两个版本行，
+     * 旧版本行的 sha 不在边界树中（树里只有修改后的 sha）——按 sha 判定会把旧行误判为「窗口内新增」、
+     * 写入 now() 后永久泄漏进 lite。上游实测一年间有 17 个活动地图文件在边界前被修改过。按文件名判定
+     * 语义恰好正确：「该文件（关卡）在边界时刻是否已存在」，与内容版本无关。
      *
      * 窗口内的行写 `now()`，窗口外的行写 `窗口起点 - 1 天`（查询用 `>=`，故必须落在起点之前）。
      *
      * **幂等**：只处理 `updated_at IS NULL` 的行，且在 DB 层用条件更新，因此可挂在多个触发点重复调用
      * （见 [UpdatedAtBackfillSource]）。无待回填行时只花一条 COUNT，不触网。
      *
-     * 已知残留误差（可接受）：文件被删除后以相同内容重新加入时 blob sha 不变，会被判为窗口外。
-     * 这类行的名字仍然正确，只是不进 lite；反向误差（老文件被改动 → sha 变化）会被判为窗口内，与真实
-     * 语义一致。
+     * 已知残留误差（可接受）：文件在边界前被删除时其行不在边界清单里，会被判为窗口内；这类行的名字仍然
+     * 正确，只是多余地进一次 lite。文件被删除后以相同名字重新加入时同判窗口外，同理无害。
      */
     suspend fun backfillUpdatedAt(source: UpdatedAtBackfillSource): UpdatedAtBackfillStat = log.traceRun("LEVEL-UPDATED-AT-BACKFILL") {
         val pending = try {
@@ -438,10 +443,14 @@ class ArkLevelService(
                 logI { "未取到 $windowStart 之前的提交，$pending 行留待下次执行" }
                 return@traceRun UpdatedAtBackfillStat(scanned = pending.toInt())
             }
-            val oldShas = fetchTilePosGithubTreesToUpdate(boundaryCommit).mapTo(HashSet()) { it.sha }
+            val oldPaths = fetchTilePosGithubTreesToUpdate(boundaryCommit).mapTo(HashSet()) { it.path }
 
             val blanks = withContext(Dispatchers.IO) { arkLevelRepo.findAllNullUpdatedAt() }
-            val (inWindow, outOfWindow) = blanks.partition { it.sha !in oldShas }
+            val (inWindow, outOfWindow) = blanks.partition { row ->
+                // stageId/levelId 缺失、构造不出文件名的行无法判定，按「宁可少返」口径判窗口外
+                val fileName = row.upstreamFileName()
+                fileName != null && fileName !in oldPaths
+            }
             val now = LocalDateTime.now()
             val updates = inWindow.map { it.id to now } +
                 outOfWindow.map { it.id to windowStart.minusDays(1) }
@@ -455,6 +464,20 @@ class ArkLevelService(
             logE(e) { "updated_at 回填失败，$pending 行留待下次执行" }
             UpdatedAtBackfillStat(scanned = pending.toInt())
         }
+    }
+
+    /**
+     * 行与上游地图文件的对应关系（与 [fetchTilePosGithubTreesToUpdate] 返回清单中的 `path` 同口径，
+     * 该清单来自逐级下钻后的地图目录 tree，path 是不含目录前缀的纯文件名）：
+     * `{stageId}-{levelId 中的 / 替换为 -}.json`，如 stageId=`act1dp_01`、
+     * levelId=`activities/act1dp/level_act1dp_01` → `act1dp_01-activities-act1dp-level_act1dp_01.json`。
+     *
+     * stageId/levelId 缺失的行构造不出文件名，返回 null，由调用方按窗口外处理。
+     */
+    private fun ArkLevelEntity.upstreamFileName(): String? {
+        val stageId = stageId ?: return null
+        val levelId = levelId ?: return null
+        return "$stageId-${levelId.replace('/', '-')}.json"
     }
 
     suspend fun updateLevelsOfTypeInBatch(

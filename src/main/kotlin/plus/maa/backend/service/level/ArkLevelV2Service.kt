@@ -25,49 +25,42 @@ internal const val LITE_WINDOW_MONTHS = 3
  *
  * 两条设计约束（方案 §2、§3.3）：
  *
- * 1. **版本号与行数据必须来自同一次计算**（本方法内先查行、再用这些行算摘要）。版本号相同即保证
+ * 1. **版本号与行数据必须来自同一次计算**（[snapshot] 内先查行、再用这些行算摘要）。版本号相同即保证
  *    内容相同，客户端据此把 `?v=<版本>` 当不可变资源长期缓存。若版本号另算一处（另一条查询或另一层
  *    缓存），就会出现「新版本号配旧数据」的错配，而客户端会把它当 immutable 永久缓存——错误被放大成
  *    长期脏数据。
  * 2. **`lite` 与 full 的行集合不同**，各有独立版本号（共用会让彼此无谓失效）；`withSize` 只决定是否
  *    携带 `width`/`height`，不改变行集合，因此与同变体的 no-size 天然共用版本号（同一份行数据算出）。
- * 缓存：Caffeine（与现有 `arkLevelInfos` 同规格，`expireAfterWrite=300s`），缓存名由 [CacheConfig] 兜底注册，
- * 不依赖外部配置是否同步更新。同步任务最快 10 分钟才有
- * 新数据，5 分钟缓存最多让客户端晚 5 分钟看到；且 `/version` 与内容端点共用同一批缓存条目，
- * 二者给出的版本号不可能互相矛盾。
+ *
+ * 缓存（Caffeine，`expireAfterWrite=300s`，缓存名由 [CacheConfig] 兜底注册）：**缓存键只含 `lite`**，
+ * 存储形态是 [LevelSnapshot]（保留 width/height 的行数据），`withSize` 投影在缓存之外做。若把 withSize
+ * 也纳入缓存键，`/version`（no-size）与内容端点（with-size）会命中**独立过期**的两份快照：同步改表后
+ * 一个条目热、另一个冷的过渡窗内，二者给出互相矛盾的版本号，客户端反复重取直到条目收敛。
+ *
+ * **勿在类内包一层便捷方法转调 [snapshot]**：`@Cacheable` 走代理，同类内部调用不生效，缓存会静默失效
+ * ——`snapshot` 必须由 controller 直接调用。
+ *
+ * 同步任务最快 10 分钟才有新数据，5 分钟缓存最多让客户端晚 5 分钟看到；`/version` 与内容端点以同一
+ * 个 `lite` 为键命中同一快照，给出的版本号不可能互相矛盾。
  */
 @Service
 class ArkLevelV2Service(
     private val arkLevelRepo: ArkLevelRepository,
 ) {
     /**
-     * 取变体快照（内容 + 版本号）。
+     * 取变体快照（行数据 + 版本号）；响应体由 [LevelSnapshot.toPayload] 投影。
      *
      * @param lite true 时只返回近 [LITE_WINDOW_MONTHS] 个月同步进来的活动关卡（见方案 §4）
-     * @param withSize 是否携带 `width`/`height`；false 时二者为 null，由全局
-     *   `explicitNulls = false` 省略键（不是 `"width": null`）
      */
     @Cacheable(CacheConfig.ARK_LEVEL_SNAPSHOTS_V2)
-    fun payload(lite: Boolean, withSize: Boolean): LevelPayload {
+    fun snapshot(lite: Boolean): LevelSnapshot {
         val rows = if (lite) {
             arkLevelRepo.findAllUpdatedSince(ArkLevelType.ACTIVITIES.display, liteWindowStart())
         } else {
             arkLevelRepo.findAllOrdered()
         }
-        return LevelPayload(version = digest(rows), levels = rows.map { it.toDto(withSize) })
+        return LevelSnapshot(version = digest(rows), rows = rows)
     }
-
-    private fun ArkLevelEntity.toDto(withSize: Boolean): ArkLevelInfoV2 = ArkLevelInfoV2(
-        // 与 v1 的 ArkLevelConverter 一致：库里可空的列在响应里退化为空串
-        levelId = levelId ?: "",
-        stageId = stageId ?: "",
-        catOne = catOne ?: "",
-        catTwo = catTwo ?: "",
-        catThree = catThree ?: "",
-        name = name ?: "",
-        width = if (withSize) width else null,
-        height = if (withSize) height else null,
-    )
 
     companion object {
         /**
@@ -132,4 +125,37 @@ class ArkLevelV2Service(
             field(row.height)
         }
     }
+}
+
+/**
+ * 某个 `lite` 变体的快照：一份行数据 + 由这批行算出的内容版本号。
+ *
+ * 这是缓存（[ArkLevelV2Service.snapshot]）的存储形态——**缓存键只含 lite**，withSize 的取舍在缓存
+ * 之外由 [toPayload] 投影，因此同变体的大小两份响应永远共用同一版本号。行数据必须保留 width/height
+ * （DTO 省略后无法从缓存条目恢复），这也是快照存实体而非 DTO 的原因。
+ */
+data class LevelSnapshot(val version: String, val rows: List<ArkLevelEntity>) {
+
+    /**
+     * 把快照投影成响应体。
+     *
+     * @param withSize 是否携带 `width`/`height`；false 时二者为 null，由全局 `explicitNulls = false`
+     *   省略键（不是 `"width": null`）
+     */
+    fun toPayload(withSize: Boolean): LevelPayload = LevelPayload(
+        version = version,
+        levels = rows.map { it.toDto(withSize) },
+    )
+
+    private fun ArkLevelEntity.toDto(withSize: Boolean): ArkLevelInfoV2 = ArkLevelInfoV2(
+        // 与 v1 的 ArkLevelConverter 一致：库里可空的列在响应里退化为空串
+        levelId = levelId ?: "",
+        stageId = stageId ?: "",
+        catOne = catOne ?: "",
+        catTwo = catTwo ?: "",
+        catThree = catThree ?: "",
+        name = name ?: "",
+        width = if (withSize) width else null,
+        height = if (withSize) height else null,
+    )
 }

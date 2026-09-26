@@ -63,11 +63,13 @@ class ArkLevelUpdatedAtBackfillTest : TestDbSupport() {
     )
 
     /**
-     * 桩：边界时刻的地图目录里有 `old.json`（sha = OLD_SHA），没有 `new.json`。
+     * 桩：边界时刻的地图目录里有 [insert] 产出的 `old` 行对应的上游文件，没有 `new` 行对应的文件。
+     * 文件名须按上游命名规则构造（`{stageId}-{levelId 中 / 替换为 -}.json`，如
+     * `old-activities-act-old.json`），回填按文件名判定行的窗口归属。
      *
      * @param filePaths 边界时刻地图目录下的文件清单
      */
-    private fun stubBoundaryTrees(filePaths: List<String> = listOf("main/old.json")) {
+    private fun stubBoundaryTrees(filePaths: List<String> = listOf("old-activities-act-old.json")) {
         coEvery { githubRepo.getCommitsOfPath(any(), any(), any()) } returns listOf(boundaryCommit)
         coEvery { githubRepo.getTrees(any(), boundaryCommit.sha) } returns GithubTrees(
             sha = boundaryCommit.sha,
@@ -108,7 +110,7 @@ class ArkLevelUpdatedAtBackfillTest : TestDbSupport() {
         val stat = service.backfillUpdatedAt(UpdatedAtBackfillSource.STARTUP)
 
         assertEquals(2, stat.scanned)
-        assertEquals(1, stat.inWindow, "sha 不在边界 tree 里的行 = 窗口内新增")
+        assertEquals(1, stat.inWindow, "文件名不在边界 tree 里的行 = 窗口内新增")
         assertEquals(1, stat.outOfWindow)
         assertEquals(2, stat.written)
 
@@ -119,6 +121,53 @@ class ArkLevelUpdatedAtBackfillTest : TestDbSupport() {
         assertTrue(oldUpdatedAt < windowStart, "窗口外的行必须落在窗口外，实测 $oldUpdatedAt")
         // 该行随后会被 lite 查询命中，端到端验证一次
         assertEquals(setOf(fresh.id), repository.findAllUpdatedSince(ArkLevelType.ACTIVITIES.display, windowStart).map { it.id }.toSet())
+    }
+
+    @Test
+    fun staleRowOfAModifiedFileStaysOutOfWindow() = runTest {
+        // 同步对每个新 blob sha 都插入新行且不删旧行，所以「边界前被修改过的文件」在库里有同一路径的
+        // 两个版本行：旧版本行的 sha 不在边界树中（树里只有修改后的 sha），但该关卡在边界时刻早已
+        // 存在。按 sha 判定会把旧行误判为窗口内新增、永久泄漏进 lite（上游实测 2025-06~2026-06 间
+        // 有 17 个活动地图文件在边界前被修改）；必须按文件名判定。
+        stubBoundaryTrees() // 边界树里 old 文件的 sha = blob-sha-0
+        val staleRow = insert(stageId = "old", sha = "sha-before-modification")
+        val currentRow = insert(stageId = "old", sha = "blob-sha-0")
+
+        val stat = service.backfillUpdatedAt(UpdatedAtBackfillSource.STARTUP)
+
+        assertEquals(0, stat.inWindow, "修改前版本的旧行不是新增关卡，不得进入 lite")
+        assertEquals(2, stat.outOfWindow)
+        val windowStart = ArkLevelV2Service.liteWindowStart()
+        assertTrue(repository.findById(staleRow.id)!!.updatedAt!! < windowStart, "旧行必须落在窗口外")
+        assertTrue(repository.findById(currentRow.id)!!.updatedAt!! < windowStart)
+        assertEquals(
+            emptySet<Long>(),
+            repository.findAllUpdatedSince(ArkLevelType.ACTIVITIES.display, windowStart).map { it.id }.toSet(),
+            "lite 不得包含修改前的旧版本行",
+        )
+    }
+
+    @Test
+    fun rowsWithoutUpstreamFileNameFallOutOfWindow() = runTest {
+        // stageId/levelId 缺失的行构造不出上游文件名，无法判定窗口归属：按「宁可少返」口径判窗口外，
+        // 而不是抛异常或猜测窗口内
+        stubBoundaryTrees()
+        val row = repository.insertEntity(
+            ArkLevelEntity(
+                levelId = null, stageId = null, sha = "sha-x",
+                catOne = ArkLevelType.ACTIVITIES.display, catTwo = "活动", catThree = "C-1", name = "关卡",
+                width = 1, height = 1, updatedAt = null,
+            ),
+        )
+
+        val stat = service.backfillUpdatedAt(UpdatedAtBackfillSource.STARTUP)
+
+        assertEquals(1, stat.outOfWindow)
+        assertEquals(0, stat.inWindow)
+        assertTrue(
+            repository.findById(row.id)!!.updatedAt!! < ArkLevelV2Service.liteWindowStart(),
+            "无法定位文件的行落在窗口外",
+        )
     }
 
     @Test

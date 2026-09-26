@@ -61,7 +61,7 @@ class ArkLevelController(
         @RequestParam(defaultValue = "false") lite: Boolean,
         @RequestParam(defaultValue = "false") withSize: Boolean,
     ): MaaResult<LevelPayload>? {
-        val payload = arkLevelV2Service.payload(lite, withSize)
+        val payload = arkLevelV2Service.snapshot(lite).toPayload(withSize)
         response.setHeader(
             HttpHeaders.CACHE_CONTROL,
             LevelCachePolicy.cacheControl(v, payload.version, request.queryString, lite, withSize),
@@ -77,7 +77,8 @@ class ArkLevelController(
     /**
      * 版本探测端点：一次往返取到两个变体的当前版本号，客户端据此决定是否要重新拉数据。
      *
-     * 与内容端点共用 [ArkLevelV2Service] 的同一批缓存条目，因此二者给出的版本号**不可能互相矛盾**。
+     * 与内容端点都以 `lite` 为缓存键命中 [ArkLevelV2Service.snapshot] 的同一批快照，因此二者给出的
+     * 版本号**不可能互相矛盾**。
      */
     @GetMapping("/arknights/level/v2/version")
     @ApiResponse(description = "关卡数据版本号")
@@ -86,8 +87,8 @@ class ArkLevelController(
         response.setHeader(HttpHeaders.CACHE_CONTROL, LevelCachePolicy.SHORT)
         return success(
             LevelVersions(
-                full = arkLevelV2Service.payload(lite = false, withSize = false).version,
-                lite = arkLevelV2Service.payload(lite = true, withSize = false).version,
+                full = arkLevelV2Service.snapshot(lite = false).version,
+                lite = arkLevelV2Service.snapshot(lite = true).version,
             ),
         )
     }
