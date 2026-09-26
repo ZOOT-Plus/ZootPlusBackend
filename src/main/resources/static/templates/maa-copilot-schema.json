@@ -1,6 +1,7 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema",
-  "title": "Maa Copilot Operation",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Copilot Operation",
+  "type": "object",
   "properties": {
     "stage_name": {
       "$ref": "#/definitions/stage_name"
@@ -33,20 +34,16 @@
       }
     }
   },
-  "required": [
-    "stage_name",
-    "minimum_required",
-    "doc"
-  ],
+  "required": ["stage_name", "minimum_required", "doc"],
   "definitions": {
     "stage_name": {
       "type": "string",
-      "description": "Arknights level id like obt/main/level_main_00-01"
+      "description": "The level's name, stage ID, or level ID."
     },
     "minimum_required": {
       "type": "string",
       "description": "Minimum required MAA version, need to match semantic version schema, required, reserved field, not implemented.",
-      "default": "v4.0.0",
+      "default": "v6.0.0",
       "pattern": "^v((0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?)$"
     },
     "doc": {
@@ -60,7 +57,8 @@
         },
         "details": {
           "type": "string",
-          "description": "Operation description"
+          "description": "Operation description",
+          "minLength": 1
         },
         "title_color": {
           "type": "string",
@@ -71,10 +69,7 @@
           "description": "The color of details text displayed in Maa"
         }
       },
-      "required": [
-        "title",
-        "details"
-      ]
+      "required": ["title", "details"]
     },
     "operator": {
       "type": "object",
@@ -104,9 +99,7 @@
           "$ref": "#/definitions/operator_requirements"
         }
       },
-      "required": [
-        "name"
-      ]
+      "required": ["name"]
     },
     "operator_requirements": {
       "type": "object",
@@ -164,10 +157,7 @@
           }
         }
       },
-      "required": [
-        "name",
-        "opers"
-      ]
+      "required": ["name", "opers"]
     },
     "action": {
       "type": "object",
@@ -175,7 +165,7 @@
       "properties": {
         "type": {
           "type": "string",
-          "description": "Action type, \"Deploy (部署)\" by default. \"Deploy (部署)\" will wait until the cost is enough (unless timeout). \"Skill (技能)\" will wait until the skill is ready (unless timeout). \"SpeedUp (二倍速)\" is switchable, i.e. after using it will become 2x speed, and using it again will make it back to normal speed. \"BulletTime (子弹时间)\" is the 1/5 speed after clicking any operator. Proceeding with any other action will make it back to normal speed. \"Output\" will just print anything in doc on the UI. \"SkillDaemon\" will only use \"Use when Prepared\" skill, and do nothing until battle finished.",
+          "description": "Action type, \"Deploy (部署)\" by default. \"Deploy (部署)\" will wait until the cost is enough (unless timeout). \"Skill (技能)\" will wait until the skill is ready (unless timeout). \"SpeedUp (二倍速)\" is switchable, i.e. after using it will become 2x speed, and using it again will make it back to normal speed. \"BulletTime (子弹时间)\" is the 1/5 speed after clicking any operator. Proceeding with any other action will make it back to normal speed. \"Output\" will just print anything in doc on the UI. \"SkillDaemon\" will only use \"Use when Prepared\" skill, and do nothing until battle finished. \"SetUnitLocation (设置单位坐标)\" sets the tile coordinates of a battlefield unit (an operator, a summon, or a device) in the internal location table only, without performing any actual action in the game.",
           "enum": [
             "部署",
             "技能",
@@ -185,7 +175,10 @@
             "技能用法",
             "打印",
             "摆完挂机",
-            "移动镜头",
+            "移动相机",
+            "点击",
+            "滑动",
+            "设置单位坐标",
             "Deploy",
             "Skill",
             "Retreat",
@@ -194,7 +187,10 @@
             "SkillUsage",
             "Output",
             "SkillDaemon",
-            "MoveCamera"
+            "MoveCamera",
+            "Click",
+            "Swipe",
+            "SetUnitLocation"
           ]
         },
         "kills": {
@@ -204,35 +200,32 @@
         },
         "costs": {
           "type": "integer",
-          "description": "Waiting until the cost for the amount specified, optional, 0 by default.",
+          "description": "Waiting until the cost for the amount specified, optional, 0 by default",
           "minimum": 0
         },
         "cost_changes": {
           "type": "integer",
           "description": "Waiting until the cost changes for the amount specified, optional, 0 by default."
         },
-        "cooling": {
-          "type": "integer",
-          "description": "The count of operators in re-deployment cooling. -1 by default.",
-          "minimum": -1,
-          "default": -1
-        },
-        "condition_type": {
-          "type": "integer",
-          "description": "The condition (kills, cost_changes, cooling) calculation type. 0 means AND, 1 means OR. 0 by default.",
-          "minimum": 0,
-          "maximum": 1,
-          "default": 0
-        },
         "name": {
           "type": "string",
-          "description": "Operator/group name, required when `type` is one of \"Deploy (部署)\", Optional when `type` is \"Skill (技能)\" or \"Retreat (撤退)\"."
+          "description": "Operator/group name, required when `type` is one of \"Deploy (部署)\" | \"Skill (技能)\" | \"Retreat (撤退)\" | \"SetUnitLocation (设置单位坐标)\"; for \"SetUnitLocation (设置单位坐标)\" it can be any battlefield unit, e.g. an operator, a summon, or a device."
         },
         "location": {
           "type": "array",
-          "description": "Position for deployment. Required when `type` is \"Deploy (部署)\".  Optional when `type` is \"Retreat (撤退)\" or \"Skill (技能)\". Recommended only when multiple summons exist, retreating with location instead of name. Please simply use name to retreat for normal operators.",
-          "minLength": 2,
-          "maxLength": 2,
+          "description": "Position for deployment. Required when `type` is \"Deploy (部署)\" or \"SetUnitLocation (设置单位坐标)\".  Optional when `type` is \"Retreat (撤退)\". Recommended only when multiple summons exist, retreating with location instead of name. Please simply use name to retreat for normal operators. When `type` is \"Click (点击)\", at least one of `rect` and `location` is required (failing to provide either fails to load the operation); when both are set, `rect` takes precedence with a warning. Any legal tile (including [0, 0]) can be clicked.",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "rect": {
+          "type": "array",
+          "description": "720p-based pixel rect [x, y, w, h] to click when `type` is \"Click (点击)\". A random point inside the rect is picked and scaled to the actual resolution. At least one of `rect` and `location` is required; when both are set, `rect` takes precedence with a warning.",
+          "minItems": 4,
+          "maxItems": 4,
           "items": {
             "type": "integer",
             "minimum": 0
@@ -241,18 +234,7 @@
         "direction": {
           "type": "string",
           "description": "Direction for deployment, required when `type` is \"Deploy (部署)\".",
-          "enum": [
-            "Left",
-            "Right",
-            "Up",
-            "Down",
-            "None",
-            "左",
-            "右",
-            "上",
-            "下",
-            "无"
-          ]
+          "enum": ["Left", "Right", "Up", "Down", "None", "左", "右", "上", "下", "无"]
         },
         "skill_usage": {
           "type": "integer",
@@ -272,12 +254,6 @@
           "minimum": 0,
           "default": 0
         },
-        "post_delay": {
-          "type": "integer",
-          "description": "Post-delay in ms, optional, 0 by default.",
-          "minimum": 0,
-          "default": 0
-        },
         "doc": {
           "type": "string",
           "description": "Action description. Optional. Displayed on the UI with no effects."
@@ -285,6 +261,65 @@
         "doc_color": {
           "type": "string",
           "description": "Action description color. Optional. Displayed on the UI with no effects"
+        },
+        "keep_kills": {
+          "type": "boolean",
+          "description": "When `type` is \"MoveCamera (移动相机)\", optional, false by default. When true, the camera moves without waiting for the current wave to end and the kill count is not reset, useful for moving the camera within the same wave."
+        },
+        "begin": {
+          "type": "array",
+          "description": "Swipe begin rect, required when `type` is \"Swipe (滑动)\". 720p-based pixel rect [x, y, w, h]; the begin point is picked randomly inside the rect and scaled to the actual resolution.",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "end": {
+          "type": "array",
+          "description": "Swipe end rect, required when `type` is \"Swipe (滑动)\". 720p-based pixel rect [x, y, w, h]; the end point is picked randomly inside the rect and scaled to the actual resolution.",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "duration": {
+          "type": "integer",
+          "description": "Swipe duration in ms, optional, 0 by default.",
+          "minimum": 0,
+          "default": 0
+        },
+        "extra_swipe": {
+          "type": "integer",
+          "description": "Extra swipe direction appended after the main swipe when `type` is \"Swipe (滑动)\", used to cancel the fling inertia on the main swipe axis. 0 disables it (default); 1/2/3/4 mean up/down/left/right.",
+          "minimum": 0,
+          "maximum": 4,
+          "default": 0
+        },
+        "slope_in": {
+          "type": "integer",
+          "description": "Swipe start slope, optional, 10 by default. Stored as an integer scaled by 10, i.e. 10 means 1.0.",
+          "minimum": 0,
+          "default": 10
+        },
+        "slope_out": {
+          "type": "integer",
+          "description": "Swipe end slope, optional, 10 by default. Stored as an integer scaled by 10, i.e. 10 means 1.0.",
+          "minimum": 0,
+          "default": 10
+        },
+        "with_pause": {
+          "type": "boolean",
+          "description": "Whether to pause while swiping, optional, false by default. Only supported by some touch modes.",
+          "default": false
+        },
+        "high_resolution_swipe_fix": {
+          "type": "boolean",
+          "description": "Whether to enable the high resolution swipe fix, optional, false by default.",
+          "default": false
         }
       }
     }
