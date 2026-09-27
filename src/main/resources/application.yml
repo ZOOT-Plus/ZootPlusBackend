@@ -17,6 +17,9 @@ spring:
   freemarker:
     check-template-location: false
   # 缓存配置，使用caffeine缓存框架，缓存时长为5分钟，最大缓存数量500
+  # 注意：声明了 cache-names 后 CacheManager 不再动态创建缓存，@Cacheable 用到的新名字必须在此登记，
+  # 否则启动后访问该端点会抛 Cannot find cache named '...'；arkLevelSnapshotsV2 有意不在此列——
+  # 它由 CacheConfig 以独立 TTL 注册（写路径事件主动失效，见 ArkLevelsSyncedEvent）
   cache:
     cache-names: arkLevel, arkLevelInfos, copilotPage
     type: caffeine

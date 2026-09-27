@@ -66,7 +66,7 @@ dependencies {
     }
     testImplementation(zonkyBinaryArtifact())
 
-    implementation("org.flywaydb:flyway-core")
+    implementation("org.springframework.boot:spring-boot-flyway")
     implementation("org.flywaydb:flyway-database-postgresql")
 
     implementation("org.aspectj:aspectjrt:1.9.25.1")

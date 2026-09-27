@@ -6,6 +6,7 @@ import io.mockk.verify
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
+import org.springframework.context.ApplicationEventPublisher
 import plus.maa.backend.common.serialization.defaultJson
 import plus.maa.backend.common.utils.converter.ArkLevelConverter
 import plus.maa.backend.common.utils.converter.ArkLevelEntityConverter
@@ -34,6 +35,7 @@ class ArkLevelNameRepairTest : TestDbSupport() {
 
     private val repository = ArkLevelRepository(jdbi)
     private val redisCache = mockk<RedisCache>(relaxed = true)
+    private val eventPublisher = mockk<ApplicationEventPublisher>(relaxed = true)
     private val service = ArkLevelService(
         properties = MaaCopilotProperties(),
         githubRepo = mockk<GithubRepository>(relaxed = true),
@@ -42,6 +44,7 @@ class ArkLevelNameRepairTest : TestDbSupport() {
         json = defaultJson,
         arkLevelConverter = mockk<ArkLevelConverter>(relaxed = true),
         arkLevelEntityConverter = ArkLevelEntityConverter(),
+        eventPublisher = eventPublisher,
     )
 
     /** 桩快照：activities/act1dp/level_act1dp_01 → act1dp_zone1 → [activityName]。 */
@@ -102,6 +105,8 @@ class ArkLevelNameRepairTest : TestDbSupport() {
         assertEquals(0, stat.skipped)
         assertEquals(0, stat.stillEmpty)
         assertEquals("登临意", repository.findById(row.id)!!.catTwo)
+        // cat_two 进 v2 摘要：写过行必须发事件，v2 快照缓存才会失效并预热
+        verify(exactly = 1) { eventPublisher.publishEvent(ArkLevelsSyncedEvent) }
     }
 
     @Test
@@ -115,6 +120,8 @@ class ArkLevelNameRepairTest : TestDbSupport() {
         assertEquals(0, second.repaired, "重复执行第二次应为 0 变更")
         assertEquals(0, second.scanned, "已修复的行不再命中空值查询")
         assertEquals(1, repository.count(), "回填不新增行")
+        // 第二次没写过任何行，不得再发事件（无谓的快照重建）
+        verify(exactly = 1) { eventPublisher.publishEvent(ArkLevelsSyncedEvent) }
     }
 
     @Test
@@ -207,6 +214,7 @@ class ArkLevelNameRepairTest : TestDbSupport() {
             json = defaultJson,
             arkLevelConverter = mockk<ArkLevelConverter>(relaxed = true),
             arkLevelEntityConverter = ArkLevelEntityConverter(),
+            eventPublisher = eventPublisher,
         )
 
         val stat = racedService.repairMissingActivityNames(holder())
@@ -282,5 +290,6 @@ class ArkLevelNameRepairTest : TestDbSupport() {
         json = defaultJson,
         arkLevelConverter = mockk<ArkLevelConverter>(relaxed = true),
         arkLevelEntityConverter = ArkLevelEntityConverter(),
+        eventPublisher = eventPublisher,
     )
 }
