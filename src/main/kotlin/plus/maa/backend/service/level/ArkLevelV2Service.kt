@@ -1,6 +1,8 @@
 package plus.maa.backend.service.level
 
+import org.springframework.cache.CacheManager
 import org.springframework.cache.annotation.Cacheable
+import org.springframework.context.event.EventListener
 import org.springframework.stereotype.Service
 import plus.maa.backend.config.CacheConfig
 import plus.maa.backend.controller.response.copilot.ArkLevelInfoV2
@@ -25,41 +27,68 @@ internal const val LITE_WINDOW_MONTHS = 3
  *
  * 两条设计约束（方案 §2、§3.3）：
  *
- * 1. **版本号与行数据必须来自同一次计算**（[snapshot] 内先查行、再用这些行算摘要）。版本号相同即保证
+ * 1. **版本号与行数据必须来自同一次计算**（[computeSnapshot] 内先查行、再用这些行算摘要）。版本号相同即保证
  *    内容相同，客户端据此把 `?v=<版本>` 当不可变资源长期缓存。若版本号另算一处（另一条查询或另一层
  *    缓存），就会出现「新版本号配旧数据」的错配，而客户端会把它当 immutable 永久缓存——错误被放大成
  *    长期脏数据。
  * 2. **`lite` 与 full 的行集合不同**，各有独立版本号（共用会让彼此无谓失效）；`withSize` 只决定是否
  *    携带 `width`/`height`，不改变行集合，因此与同变体的 no-size 天然共用版本号（同一份行数据算出）。
  *
- * 缓存（Caffeine，`expireAfterWrite=300s`，缓存名由 [CacheConfig] 兜底注册）：**缓存键只含 `lite`**，
- * 存储形态是 [LevelSnapshot]（保留 width/height 的行数据），`withSize` 投影在缓存之外做。若把 withSize
- * 也纳入缓存键，`/version`（no-size）与内容端点（with-size）会命中**独立过期**的两份快照：同步改表后
- * 一个条目热、另一个冷的过渡窗内，二者给出互相矛盾的版本号，客户端反复重取直到条目收敛。
+ * 缓存（Caffeine，独立 TTL，由 [CacheConfig] 兜底注册——不进全局 `spring.cache` 的 5 分钟 spec）：
+ * **缓存键只含 `lite`**，存储形态是 [LevelSnapshot]（保留 width/height 的行数据），`withSize` 投影在
+ * 缓存之外做。若把 withSize 也纳入缓存键，`/version`（no-size）与内容端点（with-size）会命中**独立
+ * 过期**的两份快照：同步改表后一个条目热、另一个冷的过渡窗内，二者给出互相矛盾的版本号，客户端反复
+ * 重取直到条目收敛。
+ *
+ * **新鲜度由写路径主动失效保证**（[ArkLevelsSyncedEvent] → [onArkLevelsChanged] 失效并立即重建），
+ * TTL 只在事件丢失或出现未发事件的写路径时兜底，故远长于同步周期。
  *
  * **勿在类内包一层便捷方法转调 [snapshot]**：`@Cacheable` 走代理，同类内部调用不生效，缓存会静默失效
- * ——`snapshot` 必须由 controller 直接调用。
- *
- * 同步任务最快 10 分钟才有新数据，5 分钟缓存最多让客户端晚 5 分钟看到；`/version` 与内容端点以同一
- * 个 `lite` 为键命中同一快照，给出的版本号不可能互相矛盾。
+ * ——`snapshot` 必须由 controller 直接调用，预热必须像 [onArkLevelsChanged] 那样直写缓存。
  */
 @Service
 class ArkLevelV2Service(
     private val arkLevelRepo: ArkLevelRepository,
+    private val cacheManager: CacheManager,
 ) {
     /**
      * 取变体快照（行数据 + 版本号）；响应体由 [LevelSnapshot.toPayload] 投影。
      *
-     * @param lite true 时只返回近 [LITE_WINDOW_MONTHS] 个月同步进来的活动关卡（见方案 §4）
+     * @param lite true 时只返回近 [LITE_WINDOW_MONTHS] 个月同步进来的关卡（不限类型，见方案 §4）
      */
     @Cacheable(CacheConfig.ARK_LEVEL_SNAPSHOTS_V2)
-    fun snapshot(lite: Boolean): LevelSnapshot {
+    fun snapshot(lite: Boolean): LevelSnapshot = computeSnapshot(lite)
+
+    /**
+     * 无注解的纯计算体：[snapshot]（经代理走缓存）与 [onArkLevelsChanged]（预热直写缓存）共用，
+     * 保证两条路径对同一变体永远算出同一份「行数据 + 版本号」。
+     */
+    private fun computeSnapshot(lite: Boolean): LevelSnapshot {
         val rows = if (lite) {
-            arkLevelRepo.findAllUpdatedSince(ArkLevelType.ACTIVITIES.display, liteWindowStart())
+            arkLevelRepo.findAllUpdatedSince(liteWindowStart())
         } else {
             arkLevelRepo.findAllOrdered()
         }
         return LevelSnapshot(version = digest(rows), rows = rows)
+    }
+
+    /**
+     * `ark_level` 数据变化后（[ArkLevelsSyncedEvent]，同步派发）立即失效并重建两个变体的快照。
+     *
+     * 在发布线程上执行两次全表查询 + 摘要（毫秒级），换取：写路径主动失效支撑长 TTL，且变更后的
+     * 首个请求不必承担快照重建的冷启动。
+     *
+     * 预热必须直写缓存（`cache.put`）而不能调 [snapshot]——同类内部调用不走代理，`@Cacheable` 不生效。
+     * put 的键就是 `snapshot(lite)` 的 `lite` 实参本身（单参数方法下 SimpleKeyGenerator 直接返回参数），
+     * 键不一致的话预热会写进另一个键、请求端永远 miss，这条对应关系改 [snapshot] 签名时必须同步检查。
+     */
+    @EventListener
+    fun onArkLevelsChanged(event: ArkLevelsSyncedEvent) {
+        val cache = cacheManager.getCache(CacheConfig.ARK_LEVEL_SNAPSHOTS_V2)
+            ?: error("快照缓存 ${CacheConfig.ARK_LEVEL_SNAPSHOTS_V2} 未注册，注册逻辑见 CacheConfig")
+        cache.clear()
+        cache.put(false, computeSnapshot(lite = false))
+        cache.put(true, computeSnapshot(lite = true))
     }
 
     companion object {

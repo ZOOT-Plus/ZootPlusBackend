@@ -317,21 +317,21 @@ class ArkLevelRepository(
     }
 
     /**
-     * 指定分类下在 [since] 之后同步进来的行（`/arknights/level/v2` 的 lite 变体）。
+     * [since] 之后同步进来的行（`/arknights/level/v2` 的 lite 变体），**不限关卡类型**：
+     * 主线大版本更新时用户同样集中消费新主线关卡，叠加类型过滤会让 lite 恰好在流量高峰缺数据。
      *
      * 用 `>=`：边界值算窗口内，与方案 §4 的判据一致。
      * `updated_at IS NULL`（存量行尚未回填）的行不会被命中——宁可少返，不可把老数据当新数据。
      */
-    fun findAllUpdatedSince(catOne: String, since: LocalDateTime): List<ArkLevelEntity> {
+    fun findAllUpdatedSince(since: LocalDateTime): List<ArkLevelEntity> {
         return jdbi.withHandleUnchecked { handle ->
             handle.createQuery(
                 """
                 SELECT * FROM ark_level
-                WHERE cat_one = :catOne AND updated_at >= :since
+                WHERE updated_at >= :since
                 ORDER BY stage_id, id
                 """.trimIndent(),
             )
-                .bind("catOne", catOne)
                 .bind("since", since)
                 .mapTo<ArkLevelEntity>()
                 .list()

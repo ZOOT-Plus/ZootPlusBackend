@@ -710,19 +710,24 @@ class ArkLevelRepositoryTest : TestDbSupport() {
     }
 
     @Test
-    fun findAllUpdatedSinceFiltersByCatOneAndWindow() {
+    fun findAllUpdatedSinceFiltersByWindow() {
+        // lite 判据只按时间窗，**不限关卡类型**：主线大版本更新时用户同样集中消费新主线关卡，
+        // 类型过滤会让 lite 恰好在流量高峰缺数据（评审意见：主题曲更新时也有大流量）
         val cutoff = LocalDateTime.of(2026, 6, 25, 0, 0, 0)
-        val inWindow = repository.insertEntity(
+        val actNew = repository.insertEntity(
             newLevel(levelId = "act-new", catOne = "活动关卡", updatedAt = cutoff.plusDays(1)),
         )
+        val mainNew = repository.insertEntity(
+            newLevel(levelId = "main-new", catOne = "主题曲", updatedAt = cutoff.plusDays(1)),
+        )
         repository.insertEntity(newLevel(levelId = "act-old", catOne = "活动关卡", updatedAt = cutoff.minusDays(1)))
-        repository.insertEntity(newLevel(levelId = "main-new", catOne = "主题曲", updatedAt = cutoff.plusDays(1)))
+        repository.insertEntity(newLevel(levelId = "main-old", catOne = "主题曲", updatedAt = cutoff.minusDays(1)))
         repository.insertEntity(newLevel(levelId = "act-null", catOne = "活动关卡", updatedAt = null))
         val onBoundary = repository.insertEntity(newLevel(levelId = "act-edge", catOne = "活动关卡", updatedAt = cutoff))
 
-        val rows = repository.findAllUpdatedSince("活动关卡", cutoff)
-        assertEquals(setOf(inWindow.id, onBoundary.id), rows.map { it.id }.toSet(), "含边界值，不含其它分类与 NULL")
-        assertEquals(listOf(inWindow.id, onBoundary.id), rows.map { it.id }, "按 stage_id, id 排序")
+        val rows = repository.findAllUpdatedSince(cutoff)
+        assertEquals(setOf(actNew.id, mainNew.id, onBoundary.id), rows.map { it.id }.toSet(), "含边界值、不限类型，不含窗口外与 NULL")
+        assertEquals(listOf(actNew.id, mainNew.id, onBoundary.id), rows.map { it.id }, "按 stage_id, id 排序")
     }
 
     @Test

@@ -13,6 +13,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.Json
 import org.springframework.cache.annotation.Cacheable
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.data.domain.Pageable
 import org.springframework.http.client.reactive.ReactorClientHttpConnector
 import org.springframework.stereotype.Service
@@ -56,6 +57,7 @@ class ArkLevelService(
     json: Json,
     private val arkLevelConverter: ArkLevelConverter,
     private val arkLevelEntityConverter: ArkLevelEntityConverter,
+    private val eventPublisher: ApplicationEventPublisher,
 ) {
     @OptIn(ExperimentalSerializationApi::class)
     private val json = Json(from = json) {
@@ -166,6 +168,9 @@ class ArkLevelService(
                 }
             }
             if (!stale) logI { "地图数据已是最新" }
+            // 上游有新文件落库才失效 v2 快照缓存（含随后触发的一次活动名回填）；stale 但实际无新增
+            // 文件时多发一次事件无害——只是多一次毫秒级的重建
+            if (stale) eventPublisher.publishEvent(ArkLevelsSyncedEvent)
         } catch (e: Exception) {
             logE(e) { "同步地图数据失败" }
         }
@@ -366,6 +371,11 @@ class ArkLevelService(
 
         logI { "活动名回填完成：扫描 ${blanks.size}，修复 $repaired，竞争跳过 $skipped，仍缺失 $stillEmpty" }
         LevelNameRepairStat(blanks.size, repaired, skipped, stillEmpty)
+    }.also { stat ->
+        // cat_two 是 v2 响应的摘要字段：实际写过行才发事件，失效并预热快照缓存。
+        // 发在这一层（而非 public 包装）是因为它才是真正写库的入口，syncLevelData 内的调用也走这里——
+        // 与 syncLevelData 末尾的发布可能构成一次重复事件，重建幂等，多发只是多一次毫秒级重算
+        if (stat.repaired > 0) eventPublisher.publishEvent(ArkLevelsSyncedEvent)
     }
 
     /**
@@ -464,6 +474,9 @@ class ArkLevelService(
             logE(e) { "updated_at 回填失败，$pending 行留待下次执行" }
             UpdatedAtBackfillStat(scanned = pending.toInt())
         }
+    }.also { stat ->
+        // updated_at 决定 lite 的行集合：实际写过行才发事件，失效并预热快照缓存
+        if (stat.written > 0) eventPublisher.publishEvent(ArkLevelsSyncedEvent)
     }
 
     /**

@@ -4,6 +4,8 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
+import org.springframework.cache.caffeine.CaffeineCacheManager
+import plus.maa.backend.config.CacheConfig
 import plus.maa.backend.repository.TestDbSupport
 import plus.maa.backend.repository.entity.ArkLevelEntity
 import plus.maa.backend.repository.ktorm.ArkLevelRepository
@@ -12,13 +14,14 @@ import java.time.LocalDateTime
 /**
  * [ArkLevelV2Service] 的行为测试（真实 embedded PG + 真实 repository，无 Spring 上下文）。
  *
- * 直接构造服务实例，因此 `@Cacheable` 不生效——缓存行为不是本测试的对象，这里验证的是
- * 「版本号与行数据来自同一次计算」这条正确性约束（缓存只会让它更强）。
+ * 直接构造服务实例，因此 `@Cacheable` 不生效——除缓存预热测试显式操作注入的 [cacheManager] 外，
+ * 这里验证的是「版本号与行数据来自同一次计算」这条正确性约束（缓存只会让它更强）。
  */
 class ArkLevelV2ServiceTest : TestDbSupport() {
 
     private val repository = ArkLevelRepository(jdbi)
-    private val service = ArkLevelV2Service(repository)
+    private val cacheManager = CaffeineCacheManager(CacheConfig.ARK_LEVEL_SNAPSHOTS_V2)
+    private val service = ArkLevelV2Service(repository, cacheManager)
 
     private fun insert(
         levelId: String? = "activities/act1dp/level_act1dp_01",
@@ -172,20 +175,48 @@ class ArkLevelV2ServiceTest : TestDbSupport() {
     // ------------------------------------------------------------------ 行集合
 
     @Test
-    fun liteIncludesOnlyRecentActivityLevels() {
+    fun liteIncludesAllRecentlySyncedTypes() {
         // 服务每次查询现算窗口起点，故边界用 ±1 分钟留出余量（单个用例耗时在秒级）。
-        // 边界的精确语义（>= 含等于）由 ArkLevelRepositoryTest.findAllUpdatedSinceFiltersByCatOneAndWindow 锁死
+        // 边界的精确语义（>= 含等于）由 ArkLevelRepositoryTest.findAllUpdatedSinceFiltersByWindow 锁死
         val start = ArkLevelV2Service.liteWindowStart()
         val recent = insert(levelId = "act-new", stageId = "act_new", updatedAt = LocalDateTime.now().minusDays(1))
         val nearBoundary = insert(levelId = "act-edge", stageId = "act_edge", updatedAt = start.plusMinutes(1))
+        val mainNew = insert(levelId = "main-new", stageId = "main_new", catOne = "主题曲", updatedAt = LocalDateTime.now())
+        val legionNew = insert(levelId = "legion-new", stageId = "legion_new", catOne = "保全派驻", updatedAt = LocalDateTime.now())
         insert(levelId = "act-old", stageId = "act_old", updatedAt = start.minusMinutes(1))
-        insert(levelId = "main-new", stageId = "main_new", catOne = "主题曲", updatedAt = LocalDateTime.now())
-        insert(levelId = "legion-new", stageId = "legion_new", catOne = "保全派驻", updatedAt = LocalDateTime.now())
         insert(levelId = "act-null", stageId = "act_null", updatedAt = null)
 
         val lite = service.snapshot(lite = true).toPayload(withSize = false).levels
-        assertEquals(setOf(recent.levelId, nearBoundary.levelId), lite.map { it.levelId }.toSet())
-        assertEquals(6, service.snapshot(lite = false).toPayload(withSize = false).levels.size, "full 变体不受窗口与分类影响")
+        // 不按类型过滤（评审意见：主题曲更新时也有大流量，lite 缺主线新关卡会让收益恰好在高峰失效）；
+        // 窗口外与尚未回填（NULL）的行仍排除
+        assertEquals(
+            setOf(recent.levelId, nearBoundary.levelId, mainNew.levelId, legionNew.levelId),
+            lite.map { it.levelId }.toSet(),
+        )
+        assertEquals(6, service.snapshot(lite = false).toPayload(withSize = false).levels.size, "full 变体不受窗口影响")
+    }
+
+    @Test
+    fun syncEventEvictsStaleSnapshotAndRewarmsBothVariants() {
+        // 写路径主动失效 + 预热：事件到达后缓存里两个变体都必须换上按当前库重算的快照，
+        // 否则长 TTL 下客户端会拿着事件前的旧版本号/旧数据
+        insert(levelId = "act-1", stageId = "act_1")
+        val staleFull = service.snapshot(lite = false)
+
+        // 监听路径之外改库（模拟同步任务落库后发事件），并把过时快照塞进缓存
+        val cache = cacheManager.getCache(CacheConfig.ARK_LEVEL_SNAPSHOTS_V2)!!
+        cache.put(false, staleFull)
+        insert(levelId = "act-2", stageId = "act_2")
+
+        service.onArkLevelsChanged(ArkLevelsSyncedEvent)
+
+        val warmedFull = cache.get(false, LevelSnapshot::class.java)!!
+        val warmedLite = cache.get(true, LevelSnapshot::class.java)!!
+        assertEquals(2, warmedFull.rows.size, "full 快照须按当前库重算")
+        assertEquals(2, warmedLite.rows.size, "lite 快照同须重算（两行 updated_at 均在窗口内）")
+        assertNotEquals(staleFull.version, warmedFull.version)
+        assertEquals(service.snapshot(lite = false).version, warmedFull.version, "预热值须与直接重算一致")
+        assertEquals(service.snapshot(lite = true).version, warmedLite.version)
     }
 
     @Test

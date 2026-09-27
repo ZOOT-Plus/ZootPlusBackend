@@ -4,12 +4,14 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.springframework.context.ApplicationEventPublisher
 import plus.maa.backend.common.serialization.defaultJson
 import plus.maa.backend.common.utils.converter.ArkLevelConverter
 import plus.maa.backend.common.utils.converter.ArkLevelEntityConverter
@@ -37,6 +39,7 @@ class ArkLevelUpdatedAtBackfillTest : TestDbSupport() {
 
     private val repository = ArkLevelRepository(jdbi)
     private val githubRepo = mockk<GithubRepository>(relaxed = true)
+    private val eventPublisher = mockk<ApplicationEventPublisher>(relaxed = true)
     private val service = ArkLevelService(
         properties = MaaCopilotProperties(),
         githubRepo = githubRepo,
@@ -45,6 +48,7 @@ class ArkLevelUpdatedAtBackfillTest : TestDbSupport() {
         json = defaultJson,
         arkLevelConverter = mockk<ArkLevelConverter>(relaxed = true),
         arkLevelEntityConverter = ArkLevelEntityConverter(),
+        eventPublisher = eventPublisher,
     )
 
     private val properties = MaaCopilotProperties()
@@ -120,7 +124,7 @@ class ArkLevelUpdatedAtBackfillTest : TestDbSupport() {
         assertTrue(freshUpdatedAt >= windowStart, "窗口内的行必须落在 lite 窗口内，实测 $freshUpdatedAt")
         assertTrue(oldUpdatedAt < windowStart, "窗口外的行必须落在窗口外，实测 $oldUpdatedAt")
         // 该行随后会被 lite 查询命中，端到端验证一次
-        assertEquals(setOf(fresh.id), repository.findAllUpdatedSince(ArkLevelType.ACTIVITIES.display, windowStart).map { it.id }.toSet())
+        assertEquals(setOf(fresh.id), repository.findAllUpdatedSince(windowStart).map { it.id }.toSet())
     }
 
     @Test
@@ -142,7 +146,7 @@ class ArkLevelUpdatedAtBackfillTest : TestDbSupport() {
         assertTrue(repository.findById(currentRow.id)!!.updatedAt!! < windowStart)
         assertEquals(
             emptySet<Long>(),
-            repository.findAllUpdatedSince(ArkLevelType.ACTIVITIES.display, windowStart).map { it.id }.toSet(),
+            repository.findAllUpdatedSince(windowStart).map { it.id }.toSet(),
             "lite 不得包含修改前的旧版本行",
         )
     }
@@ -261,8 +265,8 @@ class ArkLevelUpdatedAtBackfillTest : TestDbSupport() {
     }
 
     @Test
-    fun ignoresNonActivityRowsWhenJudgingNothingButStillFillsThem() = runTest {
-        // 回填对所有分类生效（updated_at 是通用列），lite 查询才按分类过滤
+    fun fillsAllTypesAndLiteIgnoresType() = runTest {
+        // 回填对所有分类生效（updated_at 是通用列）；lite 查询同样不限类型，窗口内的行一律命中
         stubBoundaryTrees()
         val mainline = insert(stageId = "main_01-07", sha = "blob-sha-0", catOne = ArkLevelType.MAINLINE.display)
         val freshActivity = insert(stageId = "new", sha = "blob-sha-99")
@@ -271,8 +275,8 @@ class ArkLevelUpdatedAtBackfillTest : TestDbSupport() {
 
         assertNotNull(repository.findById(mainline.id)!!.updatedAt, "非活动关卡也要回填")
         val windowStart = ArkLevelV2Service.liteWindowStart()
-        val lite = repository.findAllUpdatedSince(ArkLevelType.ACTIVITIES.display, windowStart)
-        assertEquals(listOf(freshActivity.id), lite.map { it.id }, "lite 只含活动关卡")
+        val lite = repository.findAllUpdatedSince(windowStart)
+        assertEquals(setOf(freshActivity.id, mainline.id), lite.map { it.id }.toSet(), "lite 不按类型过滤")
     }
 
     @Test
@@ -312,5 +316,29 @@ class ArkLevelUpdatedAtBackfillTest : TestDbSupport() {
         json = defaultJson,
         arkLevelConverter = mockk<ArkLevelConverter>(relaxed = true),
         arkLevelEntityConverter = ArkLevelEntityConverter(),
+        eventPublisher = eventPublisher,
     )
+
+    // ------------------------------------------------------------------ 快照缓存事件
+
+    @Test
+    fun publishesSyncEventWhenRowsAreWritten() = runTest {
+        // updated_at 回填会改变 lite 的行集合：写完后必须发事件，v2 快照缓存才会失效并预热
+        stubBoundaryTrees()
+        insert(stageId = "old", sha = "blob-sha-0")
+        insert(stageId = "new", sha = "blob-sha-99")
+
+        service.backfillUpdatedAt(UpdatedAtBackfillSource.STARTUP)
+
+        verify(exactly = 1) { eventPublisher.publishEvent(ArkLevelsSyncedEvent) }
+    }
+
+    @Test
+    fun noSyncEventWhenNothingIsWritten() = runTest {
+        insert(stageId = "old", sha = "blob-sha-0", updatedAt = LocalDateTime.now())
+
+        service.backfillUpdatedAt(UpdatedAtBackfillSource.STARTUP)
+
+        verify(exactly = 0) { eventPublisher.publishEvent(ArkLevelsSyncedEvent) }
+    }
 }
