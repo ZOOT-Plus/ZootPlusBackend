@@ -1,0 +1,32 @@
+docs/zhparser-migration.md
+  s_e9fa50a5027845::t_8e0e8e68882c66 13,15,18-19,21
+  s_e9fa50a5027845::t_cbe83cdf7d3d4d 14,16-17,20
+src/main/resources/arknights.txt
+  s_e9fa50a5027845::t_6be7bc4874995f 286-3528
+bench/copilot-query-bench.sh
+  s_1c7a229a52829c::t_bb22aa07e7dec1 1-137
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "cca49849159ae043438bbb04b0d0abefefb872ba",
+  "prompts": {},
+  "sessions": {
+    "s_1c7a229a52829c": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a0fb5f-1b61-76de-bccd-a97653141c53",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "dragove <dragove@qq.com>"
+    },
+    "s_e9fa50a5027845": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a0fb89-ce2b-77e4-bae0-74288f00d9e1",
+        "model": "deepseek-flash"
+      },
+      "human_author": "dragove <dragove@qq.com>"
+    }
+  }
+}
