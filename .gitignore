@@ -52,4 +52,5 @@ application-prod.yml
 # local db files
 /.data/
 
-*.http
+# logs
+/bench/results
