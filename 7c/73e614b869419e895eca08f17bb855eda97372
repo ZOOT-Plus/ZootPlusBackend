@@ -1,0 +1,42 @@
+src/main/kotlin/plus/maa/backend/repository/ktorm/CopilotRepository.kt
+  s_314752caf40486::t_917235eb57ecfd 27-36,39,274-275
+dev-docker/docker-compose.yml
+  s_314752caf40486::t_9422818bcc074a 12
+bench/copilot-query-bench.sh
+  s_314752caf40486::t_1ccfcefd51c827 31-32,52-53,55-60,68-69,72
+  s_314752caf40486::t_d2cdca082c4e1d 73
+src/main/resources/db/migration/V4__zhparser_level_code_tokenization.sql
+  s_314752caf40486::t_7483128a29c6ef 33-37
+  s_314752caf40486::t_2f2cb881d35be9 1-32,38-45,47-53
+  s_314752caf40486::t_baa385848c979b 46
+docs/zhparser-migration.md
+  s_314752caf40486::t_d6e2b7ce6215ef 11,62-64,69,71,81,89-91,93-94,99-100,102,106-108,110,113-114,242,246-247,313,315-355,383-385,387-388,400-403,453
+  s_314752caf40486::t_7f19fd66199744 92,294-295,307-308,386
+  s_314752caf40486::t_2643fbffe6678f 249-252
+  s_314752caf40486::t_2b0e6830e5be42 21,410-413,421,457,459
+  s_314752caf40486::t_0c5d724b964e89 118-121,158,428
+  s_314752caf40486::t_1c448574e7fd1e 278
+  s_314752caf40486::t_39e5b437419437 13,27-55,66-67,181,206,265-270,404-407,458
+  s_314752caf40486::t_32367af85234ee 217-218,415-418,425-427,429-431
+  s_314752caf40486::t_5fb37c7d948e8d 408-409,414
+  s_314752caf40486::t_b035623ef6a199 248
+  s_314752caf40486::t_62eba4377c1743 432
+docker/docker-compose.yml
+  s_314752caf40486::t_13ffca8bf9ebcd 14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "7c73e614b869419e895eca08f17bb855eda97372",
+  "prompts": {},
+  "sessions": {
+    "s_314752caf40486": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a1024e-1833-72c4-9c5e-bb56f9c8c775",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "dragove <dragove@qq.com>"
+    }
+  }
+}
