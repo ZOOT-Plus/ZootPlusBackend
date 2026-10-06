@@ -1,0 +1,24 @@
+bench/copilot-query-bench.sh
+  h_78212b192cfe73 40,47,81-82,85,92,96,101-110
+src/main/kotlin/plus/maa/backend/repository/ktorm/CopilotRepository.kt
+  h_78212b192cfe73 39,273,387
+src/main/kotlin/plus/maa/backend/service/CopilotService.kt
+  h_78212b192cfe73 304
+src/test/kotlin/plus/maa/backend/repository/SmokeTest.kt
+  h_78212b192cfe73 12
+src/test/kotlin/plus/maa/backend/repository/TestDbSupport.kt
+  h_78212b192cfe73 17-18,21,80,82-83,88,92
+src/test/kotlin/plus/maa/backend/repository/ktorm/CopilotRepositoryTest.kt
+  h_78212b192cfe73 752
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "311fdcf87f5445f45ad1bd2aeed8b0aeb3f1d657",
+  "prompts": {},
+  "humans": {
+    "h_78212b192cfe73": {
+      "author": "dragove <dragove@qq.com>"
+    }
+  }
+}
