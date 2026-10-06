@@ -265,7 +265,6 @@ class CopilotService(
         }
 
         var inCopilotIds: List<Long>? = request.copilotIds
-        val documentKeyword = keyword?.takeIf { it.isNotEmpty() }
 
         val requestStatus = if (request.uploaderId == ME && userId != null) {
             request.status
@@ -302,7 +301,7 @@ class CopilotService(
                 status = requestStatus,
                 stageNameKeyword = stageNameKeyword,
                 stageNames = stageNames,
-                documentKeyword = documentKeyword,
+                documentKeyword = keyword,
                 inUserIds = inUserIds,
                 inCopilotIds = inCopilotIds,
                 onlyFollowingUserId = if (request.onlyFollowing) userId else null,

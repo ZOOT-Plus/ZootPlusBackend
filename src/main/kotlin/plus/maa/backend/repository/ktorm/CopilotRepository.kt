@@ -36,7 +36,7 @@ private const val ASCII_RUN_PAD = "'([A-Za-z0-9]+)', ' \\1 ', 'g'"
 
 /** 作业标题/描述的 zhparser tsvector 表达式，查询条件必须与索引表达式完全一致。 */
 private const val COPILOT_DOCUMENT_TSV_EXPR =
-    "to_tsvector('chinese_zh', regexp_replace(coalesce(title, '') || ' ' || coalesce(details, ''), $ASCII_RUN_PAD))"
+    "to_tsvector('$CHINESE_ZH_FTS_CONFIG', regexp_replace(coalesce(title, '') || ' ' || coalesce(details, ''), $ASCII_RUN_PAD))"
 
 /**
  * 模块「copilot」的 Jdbi repository。
@@ -270,11 +270,7 @@ class CopilotRepository(private val jdbi: Jdbi) {
         // websearch 会把它们拼成 <-> 短语（「阿米娅挂机」匹配不到「阿米娅精二挂机」），
         // 并会把 or/-/引号解释成运算符；plainto 把分词结果按 AND 组合，词出现在任意位置即命中。
         req.documentKeyword?.takeIf { it.isNotBlank() }?.let {
-            add(
-                "$COPILOT_DOCUMENT_TSV_EXPR @@ " +
-                    "plainto_tsquery('$CHINESE_ZH_FTS_CONFIG', regexp_replace(?, $ASCII_RUN_PAD))",
-                it,
-            )
+            add("$COPILOT_DOCUMENT_TSV_EXPR @@ plainto_tsquery('$CHINESE_ZH_FTS_CONFIG', regexp_replace(?, $ASCII_RUN_PAD))", it)
         }
         req.inUserIds?.let { addIn("uploader_id", it) }
         req.inCopilotIds?.let { addIn("copilot_id", it) }
@@ -388,10 +384,7 @@ data class CopilotQueryRequest(
     /** 原样绑定（不带 % 通配符，基线 like 语义） */
     val stageNameKeyword: String? = null,
     val stageNames: List<String>? = null,
-    /**
-     * 非空时使用 zhparser 对 title/details 做全文检索：`plainto_tsquery` 把分词结果按 AND 组合
-     * （词出现在任意位置即命中），输入中的 `or`/`-`/引号等不解释为运算符。
-     */
+    /** 非空白时对 title/details 做 zhparser 全文检索（分词结果按 AND 组合，不解释运算符）。 */
     val documentKeyword: String? = null,
     val inUserIds: List<Long>? = null,
     val inCopilotIds: List<Long>? = null,
