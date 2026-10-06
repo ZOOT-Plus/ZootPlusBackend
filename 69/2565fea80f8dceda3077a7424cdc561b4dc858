@@ -1,0 +1,21 @@
+docs/zhparser-migration.md
+  s_314752caf40486::t_17dae6a01045d7 107-108,151,158,287,291-299,407,469,525
+src/main/resources/db/migration/V3__zhparser_document_search.sql
+  s_314752caf40486::t_8c152ceaaab0c8 5-8,47,49-63,72-83,89-94
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "692565fea80f8dceda3077a7424cdc561b4dc858",
+  "prompts": {},
+  "sessions": {
+    "s_314752caf40486": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a1024e-1833-72c4-9c5e-bb56f9c8c775",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "dragove <dragove@qq.com>"
+    }
+  }
+}
