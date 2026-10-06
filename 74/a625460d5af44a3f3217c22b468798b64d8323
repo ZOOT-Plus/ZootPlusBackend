@@ -1,0 +1,25 @@
+bench/copilot-query-bench.sh
+  s_314752caf40486::t_2c9a4743cafb79 31-33,74-76
+docs/zhparser-migration.md
+  s_314752caf40486::t_490a0190ec3788 14,57-99,111-112,226,251,262-263,310,312,317-319,457-461,483-496,523
+docker/docker-compose.yml
+  s_314752caf40486::t_307370f0a0b134 14
+dev-docker/docker-compose.yml
+  s_314752caf40486::t_ffea950e9fc9a3 12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "74a625460d5af44a3f3217c22b468798b64d8323",
+  "prompts": {},
+  "sessions": {
+    "s_314752caf40486": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a1024e-1833-72c4-9c5e-bb56f9c8c775",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "dragove <dragove@qq.com>"
+    }
+  }
+}
