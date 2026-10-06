@@ -749,14 +749,7 @@ class CopilotRepositoryTest : TestDbSupport() {
     }
 
     /**
-     * `documentKeyword` 的 FTS 语义（`COPILOT_DOCUMENT_TSV_EXPR @@ plainto_tsquery('chinese_zh', ?)`）。
-     *
-     * 判别力：`plainto_tsquery` 把分词结果按 AND 组合，词出现在 title/details 任意位置都算命中。
-     * 若改回 `websearch_to_tsquery`，第 1、2 条断言会失败（无空格/带引号的输入会生成 `<->` 短语），
-     * 第 4 条也会失败（`or` 会被当成 OR 运算符）。
-     *
-     * 环境限制：embedded PG 无 zhparser，替身配置用 default parser，
-     * 这里覆盖的是 SQL 形状 / 参数绑定 / AND 语义，不覆盖中文分词质量。
+     * 判别力：改回 `websearch_to_tsquery` 时，第 2 条（引号短语）与第 4 条（`or` 运算符）断言会失败。
      */
     @Test
     fun `query document FTS combines terms with AND and ignores operators`() {

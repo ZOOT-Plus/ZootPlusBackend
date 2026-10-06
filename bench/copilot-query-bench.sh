@@ -37,17 +37,14 @@
 set -euo pipefail
 
 BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BASE_URL="${BASE_URL:-http://127.0.0.1:8848}"
-ENDPOINT="$BASE_URL/copilot/query"
+ENDPOINT="${BASE_URL:-http://127.0.0.1:8848}/copilot/query"
 CONCURRENCY="${CONCURRENCY:-1}"
 WARMUP="${WARMUP:-10}"
 LIMIT="${LIMIT:-10}"
 LABEL="${1:-$(date +%Y%m%d-%H%M%S)}"
 OUT_DIR="$BENCH_DIR/results/$LABEL"
 
-for bin in oha jq curl; do
-    command -v "$bin" >/dev/null || { echo "缺少依赖: $bin" >&2; exit 1; }
-done
+for bin in oha jq curl; do command -v "$bin" >/dev/null || { echo "缺少依赖: $bin" >&2; exit 1; }; done
 
 # 格式: 名称|document|page|请求数|基线 total|说明
 # total 为当前数据 + 当前分词口径下的基线值，用于校验实现返回结果一致（不一致会标 MISMATCH）
@@ -81,57 +78,37 @@ mkdir -p "$OUT_DIR"
 SUMMARY="$OUT_DIR/summary.tsv"
 printf 'case\tdocument\tpage\tn\texpected_total\tactual_total\tp50_ms\tp90_ms\tp99_ms\trps\tsuccess_rate\tnote\n' > "$SUMMARY"
 
-echo "== Copilot 搜索基准 =="
-echo "target      : $ENDPOINT"
-echo "label       : $LABEL"
-echo "concurrency : $CONCURRENCY (oha -c)"
-echo "warmup/case : $WARMUP"
-echo "output      : $OUT_DIR"
-echo
+printf '== Copilot 搜索基准 ==\ntarget      : %s\nlabel       : %s\nconcurrency : %s (oha -c)\n' "$ENDPOINT" "$LABEL" "$CONCURRENCY"
+printf 'warmup/case : %s\noutput      : %s\n\n' "$WARMUP" "$OUT_DIR"
 
 # 服务可用性检查：page=4 避免写 Redis 首页缓存
-curl -sf -o /dev/null "$ENDPOINT?page=4&limit=1&desc=true&orderBy=hot" ||
-    { echo "服务不可用: $ENDPOINT" >&2; exit 1; }
+curl -sf -o /dev/null "$ENDPOINT?page=4&limit=1&desc=true&orderBy=hot" || { echo "服务不可用: $ENDPOINT" >&2; exit 1; }
 
-total=${#CASES[@]}
 idx=0
 for case in "${CASES[@]}"; do
     idx=$((idx + 1))
     IFS='|' read -r name doc page n expected note <<<"$case"
 
-    qs="page=$page&limit=$LIMIT"
-    if [[ -n "$doc" ]]; then
-        qs+="&document=$(jq -rn --arg v "$doc" '$v|@uri')"
-    fi
-    qs+="&desc=true&orderBy=hot"
-    url="$ENDPOINT?$qs"
+    url="$ENDPOINT?page=$page&limit=$LIMIT&desc=true&orderBy=hot${doc:+&document=$(jq -rn --arg v "$doc" '$v|@uri')}"
     slug=$(printf '%02d-%s' "$idx" "${name// /_}")
 
     actual=$(curl -s "$url" | jq -r '.data.total // "ERR"')
-    flag="ok"
-    [[ "$actual" == "$expected" ]] || flag="MISMATCH"
+    [[ "$actual" == "$expected" ]] && flag=ok || flag=MISMATCH
 
     oha -n "$WARMUP" -c "$CONCURRENCY" --no-tui --output-format quiet "$url" >/dev/null 2>&1 || true
 
     json_file="$OUT_DIR/$slug.json"
-    if ! oha -n "$n" -c "$CONCURRENCY" --no-tui --output-format json "$url" \
-        >"$json_file" 2>"$OUT_DIR/$slug.err"; then
-        echo "[$idx/$total] $name: oha 执行失败，见 $slug.err" >&2
-        printf '%s\t%s\t%s\t%s\t%s\t%s\t-1\t-1\t-1\t-1\t0\t%s\n' \
-            "$name" "$doc" "$page" "$n" "$expected" "$actual" "$note" >>"$SUMMARY"
-        continue
+    p50=-1 p90=-1 p99=-1 rps=-1 ok=0
+    # oha 退出 0 不代表五个数值解析成功（成功率 0 时百分位为 null，jq 报错），解析失败并入哨兵行分支
+    if oha -n "$n" -c "$CONCURRENCY" --no-tui --output-format json "$url" >"$json_file" 2>"$OUT_DIR/$slug.err" &&
+        metrics=$(jq -r '.latencyPercentiles as $l | [($l.p50*1000|round),($l.p90*1000|round),($l.p99*1000|round),
+                     ((.summary.requestsPerSec*100|round)/100),.summary.successRate] | @tsv' "$json_file" 2>>"$OUT_DIR/$slug.err"); then
+        read -r p50 p90 p99 rps ok <<<"$metrics"
+        printf '[%02d/%02d] %-14s total=%-6s(%-8s) p50=%4sms p90=%4sms p99=%4sms rps=%-6s ok=%s\n' \
+            "$idx" "${#CASES[@]}" "$name" "$actual" "$flag" "$p50" "$p90" "$p99" "$rps" "$ok"
+    else
+        echo "[$idx/${#CASES[@]}] $name: 测量失败，见 $slug.err" >&2
     fi
-
-    read -r p50 p90 p99 rps ok <<<"$(
-        jq -r '[(.latencyPercentiles.p50 * 1000 | round),
-                (.latencyPercentiles.p90 * 1000 | round),
-                (.latencyPercentiles.p99 * 1000 | round),
-                ((.summary.requestsPerSec * 100 | round) / 100),
-                .summary.successRate] | @tsv' "$json_file"
-    )"
-
-    printf '[%02d/%02d] %-14s total=%-6s(%-8s) p50=%4sms p90=%4sms p99=%4sms rps=%-6s ok=%s\n' \
-        "$idx" "$total" "$name" "$actual" "$flag" "$p50" "$p90" "$p99" "$rps" "$ok"
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
         "$name" "$doc" "$page" "$n" "$expected" "$actual" "$p50" "$p90" "$p99" "$rps" "$ok" "$note" >>"$SUMMARY"
 done
