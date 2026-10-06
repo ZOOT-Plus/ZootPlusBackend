@@ -11,6 +11,7 @@
 - 文本搜索配置：`chinese_zh`（parser = zhparser，复用镜像默认配置，不存在时由 V3 创建）
 - 领域词典：`arknights.txt`，每个词统一标记为名词 `n`
 - 检索口径：`zhparser.multi_duality=on`（长词子串召回，见 1.2）
+- 单字检索：`zhparser.multi_zmain=on`（单字召回与 LIKE 子串一致，见 1.3）
 
 ### 1.1 词典词条维护规则（2026-08 重建后补充）
 
@@ -53,6 +54,49 @@ PUBLIC 语料实测（2026-10-06，42075 行；括号内为 LIKE 子串口径）
 - 该参数改的是切词口径：**改完必须 REINDEX**，且只能由服务端启动参数指定
   （会话级 `SET` 会被并行 worker 忽略，后果见第 6 节）。
 
+### 1.3 单字检索与 `multi_zmain`（2026-10 补充）
+
+只靠 1.2 的二元组，单字查询几乎搜不到东西：SCWS 只在「这个字被单独切出来」时才产生单字词元，
+`希望` → `'希望'`、`军用望远镜` → `'望远镜' '望远' '远镜'`，都**没有** `'望'`。
+
+```sql
+SELECT to_tsvector('chinese_zh', '希望');        -- 开 multi_zmain 后：'希':2 '希望':1 '望':3
+SELECT to_tsvector('chinese_zh', '军用望远镜');  -- '军':1 '望':6 '望远':4 '望远镜':3 '用':2 '远镜':5 '镜':7
+```
+
+不开 `multi_zmain` 时的实测（PUBLIC 全部 57709 行，FTS 走索引 vs LIKE 子串）：
+
+| 查询 | 无 zmain | LIKE |
+| --- | --- | --- |
+| 望 | 993 | 1401 |
+| 陈 | 71 | 392 |
+| 空 | 93 | 1438 |
+| 循 | 1 | 168 |
+| 希 | 5 | 519 |
+
+（词典里的单字词条只有 10 个 —— `陈 山 年 空 梅 拐 令 夕 孑 轴`，其他单字都得靠 zmain 补。）
+
+开 `zhparser.multi_zmain=on` 后（应用口径 PUBLIC + 未删除，索引 vs LIKE 逐项一致）：
+
+| 查询 | FTS | LIKE |
+| --- | --- | --- |
+| 望 | 1035 | 1035 |
+| 陈 | 281 | 281 |
+| 令 | 1226 | 1226 |
+| 循 | 113 | 113 |
+| 希 | 398 | 398 |
+| 空 | 1110 | 1110 |
+| 山 | 1651 | 1651 |
+
+代价与约束：
+
+- 索引平均词元数 47.8 → 59.0（+23%）；`multi_zall` 是 70.4（+47%）但没有额外收益，别开；
+- 多字查询完全不受影响（`挂机` 12646、`单核 挂机` 862、`逻各斯 模组` 129 都不变），
+  因为查询侧的多字词元不会退化成单字；
+- **停用字仍然搜不到**：`plainto_tsquery('chinese_zh','的')` / `('和')` 是空查询（NOTICE: contains only stop words），
+  返回 0 行，而 LIKE 各有 12006 / 2425 行。单字查询命中 0 行时先看是不是这一类；
+- 与 1.2 一样只能由服务端启动参数指定，**改完必须 REINDEX**（见第 6 节）。
+
 ## 2. 本次代码变更摘要
 
 - 删除 `ik-analyzer` 依赖；
@@ -64,7 +108,8 @@ PUBLIC 语料实测（2026-10-06，42075 行；括号内为 LIKE 子串口径）
 - 新增 Flyway `V3__zhparser_document_search.sql`、`V4__zhparser_level_code_tokenization.sql`；
 - `arknights.txt` 每行追加 `1.0 1.0 n`，作为 zhparser 自定义词典使用；
 - `docker/docker-compose.yml`、`dev-docker/docker-compose.yml` 的 PG 镜像更新为 zhparser 镜像并挂载词典；
-- PG 启动参数增加 `-c zhparser.multi_duality=on`（检索口径见 1.2），该开关变更后必须重建索引。
+- PG 启动参数增加 `-c zhparser.multi_duality=on`（检索口径见 1.2）、`-c zhparser.multi_zmain=on`
+  （单字检索见 1.3），两个开关变更后都必须重建索引。
 
 ## 3. Flyway V3 兜底逻辑
 
@@ -178,7 +223,7 @@ docker run -d --name pg-zh-dryrun \
   -v "$PWD/arknights.txt:/usr/local/share/postgresql/tsearch_data/arknights.txt:ro" \
   -p 127.0.0.1:55432:5432 \
   docker.io/abcfy2/zhparser:18-alpine \
-  postgres -c zhparser.extra_dicts=arknights.txt -c zhparser.multi_duality=on
+  postgres -c zhparser.extra_dicts=arknights.txt -c zhparser.multi_duality=on -c zhparser.multi_zmain=on
 
 docker logs pg-zh-dryrun | grep -E 'Skipping initialization|ready to accept'
 
@@ -203,7 +248,7 @@ services:
     image: docker.io/abcfy2/zhparser:18-alpine
     container_name: postgres
     restart: always
-    command: ["postgres", "-c", "zhparser.extra_dicts=arknights.txt", "-c", "zhparser.multi_duality=on"]
+    command: ["postgres", "-c", "zhparser.extra_dicts=arknights.txt", "-c", "zhparser.multi_duality=on", "-c", "zhparser.multi_zmain=on"]
     volumes:
       - ./data/:/var/lib/postgresql/
       - ./arknights.txt:/usr/local/share/postgresql/tsearch_data/arknights.txt:ro
@@ -214,8 +259,8 @@ services:
 ```
 
 其中 `./arknights.txt` 来自本仓库 `src/main/resources/arknights.txt`。
-**本次一并开了 `multi_duality`，它也是切词口径的一部分：首次建索引必须先让 PG 带着该参数启动；
-已有库里现存的索引仍是旧口径，必须手工 REINDEX 一次（SQL 见第 6 节），否则会出现「命中莫名变少」。**
+**本次一并开了 `multi_duality` 与 `multi_zmain`，它们也是切词口径的一部分：首次建索引必须先让 PG 带着这两个参数启动；
+已有库里现存的索引仍是旧口径，必须手工 REINDEX 一次（SQL 见第 6 节），否则会出现「命中莫名变少」、单字搜不到。**
 
 执行：
 
@@ -262,11 +307,15 @@ CREATE EXTENSION IF NOT EXISTS zhparser;
 ### 4.6 验证
 
 ```sql
--- 检索口径开关：应为 on（off/空 = 只改了会话或没重启）
+-- 检索口径开关：都应为 on（off/空 = 只改了会话或没重启）
 SHOW zhparser.multi_duality;
+SHOW zhparser.multi_zmain;
 
 -- 长词吞短词已缓解：结果里应同时出现 '挂机流' 与 '挂机'
 SELECT to_tsvector('chinese_zh', '挂机流');
+
+-- 单字检索已补齐：结果里应出现单字词元 '望'
+SELECT to_tsvector('chinese_zh', '希望');
 
 -- 配置与索引存在
 SELECT cfgname FROM pg_ts_config WHERE cfgname = 'chinese_zh';
@@ -405,8 +454,11 @@ CREATE INDEX IF NOT EXISTS idx_copilot_document_tsv
   会话级 `SET` 在并行计划里会被 worker 忽略，索引与查询会按两套口径计算，表现为「命中莫名变少」。
   2026-10 实测：索引按 off 建、查询按 on 跑时 `逻各斯 模组` 从 129 行变成 0 行
   （`SET enable_seqscan=off` 强制走索引时同样是 0 行）；
-- **改 `multi_duality` 与改词典一样必须 REINDEX**；先按 4.6 用 `SHOW zhparser.extra_dicts` /
-  `SHOW zhparser.multi_duality` 确认两者已在服务端生效，避免「按错的开关重建」；
+- `zhparser.multi_zmain` 与 `multi_duality` 同性质，同样只能由启动参数指定：
+  不开它时单字只命中「该字被单独切出来」的行（`望` 993/1401、`空` 93/1438），
+  开了之后单字与 LIKE 完全一致（见 1.3），且多字查询不受影响（实测 47.8 → 59.0 词元/行）；
+- **改 `multi_duality` / `multi_zmain` 与改词典一样必须 REINDEX**；先按 4.6 用 `SHOW` 确认
+  `zhparser.extra_dicts`、`zhparser.multi_duality`、`zhparser.multi_zmain` 都已在服务端生效，避免「按错的开关重建」；
 - **建索引 / `REINDEX` 同样受并行影响**：并行 maintenance worker 按「无额外词典」的口径写入 posting，
   索引与查询口径不一致。2026-10 实测：并行 `REINDEX` 后 `单核` / `阿米娅` 的 posting 全缺，
   `单核` 走索引 0 行、走顺序扫描 5955 行；关并行重建后两种计划命中行集合完全一致。
@@ -428,7 +480,20 @@ REINDEX INDEX CONCURRENTLY idx_copilot_document_tsv;
 
   重建后自检不能只比 `count(*)`：必须让「走索引」和「走顺序扫描」各跑一遍，比较命中行集合
   （如 `md5(string_agg(copilot_id::text, ',' ORDER BY copilot_id))`）；
-  若索引没被用上（表达式与索引不符、映射改了没重建），两次结果会不一致。
+  若索引没被用上（表达式与索引不符、映射改了没重建），两次结果会不一致。可直接跑这段：
+
+```bash
+podman exec -i postgres psql -U postgres -d zoot -X -A -F'|' -f - <<'SQL'
+SET enable_seqscan = off;   -- 强制走表达式索引
+SELECT count(*) AS n, md5(string_agg(copilot_id::text, ',' ORDER BY copilot_id)) AS h
+FROM copilot WHERE status='PUBLIC' AND "delete"=false
+  AND to_tsvector('chinese_zh', regexp_replace(coalesce(title,'')||' '||coalesce(details,''),'([A-Za-z0-9]+)',' \1 ','g'))
+      @@ plainto_tsquery('chinese_zh', regexp_replace('望','([A-Za-z0-9]+)',' \1 ','g'));
+SET enable_seqscan = on;    -- 同一句再跑一次，n 与 h 必须逐字相同
+SQL
+```
+
+  （把 `'望'` 换成 `'挂机'`、`'ZT-EX-8'` 等多字/字母数字关键词再各跑一遍。）
 
 ## 7. 回滚
 
@@ -455,7 +520,7 @@ DROP EXTENSION IF EXISTS zhparser CASCADE;
 2. **`CREATE INDEX` 会锁写并消耗磁盘**。`copilot` 数据量很大时，建议在维护窗口
    由 DBA 先执行 `CREATE INDEX CONCURRENTLY`，Flyway 中的 `IF NOT EXISTS` 会跳过。
    手工建索引同样要先 `SET max_parallel_maintenance_workers = 0;`（V4 迁移内已设置）。
-3. **词典或 `zhparser.multi_duality` 变化后必须 REINDEX**，且 `REINDEX` 前要先 `SET max_parallel_maintenance_workers = 0;`，
+3. **词典或 `zhparser.multi_duality` / `multi_zmain` 变化后必须 REINDEX**，且 `REINDEX` 前要先 `SET max_parallel_maintenance_workers = 0;`，
    否则索引按另一套切词口径生成，命中会静默变少（自检 SQL 见第 6 节）。
 4. **生产镜像建议固定 digest 或自行构建**。`abcfy2/zhparser:18-alpine` 是浮动 tag，
    每周跟随上游重建。
