@@ -28,8 +28,9 @@
 #
 # 基线（2026-10-02，PG 18.1，无任何全文检索扩展）：
 #   copilot 全表 84080 行，未删除 61376，其中 PUBLIC 42075。
-# 期望值口径（2026-10-06 起）：PG + zhparser（chinese_zh + multi_duality=on），
-#   即 plainto_tsquery 分词语义，不再等于 LIKE 子串口径（差异见各 case 的说明列）。
+# 期望值口径（2026-10-06 起）：PG + zhparser（chinese_zh + multi_duality=on + multi_zmain=on），
+#   即 plainto_tsquery 分词语义：单字已与 LIKE 子串一致（见 docs/zhparser-migration.md 1.3），
+#   多字仍有分词语义固有偏差（差异见各 case 的说明列）。
 #
 # 对比 PG 原生分词版本时以相同 label 方式各跑一次，直接对比 summary.tsv。
 #
@@ -70,7 +71,9 @@ CASES=(
     "逻各斯 模组-双词|逻各斯 模组|1|120|129|双词交集"
     "银灰 单核-双词|银灰 单核|1|120|27|双词交集"
     "ZT-EX-8-关卡号|ZT-EX-8|1|120|55|英文数字关键词"
-    "令-单字符|令|1|80|1180|Kotlin 版单字符也走 FTS 过滤；遗留实现是不过滤=42075，是否恢复旁路待确认"
+    "令-单字-词典词条|令|1|80|1226|multi_zmain：单字与 LIKE 一致（LIKE 1226）"
+    "望-单字-非词典|望|1|80|1035|multi_zmain 补单字词元后才召回（旧口径 993/1401，LIKE 1035）"
+    "陈-单字-被长词吞掉|陈|1|80|281|multi_zmain：与 LIKE 一致（LIKE 281）"
     "无关键词基线||4|80|42075|空关键词 page=4 绕开 Redis 首页缓存"
 )
 

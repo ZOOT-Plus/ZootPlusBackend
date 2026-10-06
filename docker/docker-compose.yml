@@ -11,7 +11,7 @@ services:
     image: docker.io/abcfy2/zhparser:18-alpine
     container_name: postgres
     restart: always
-    command: ["postgres", "-c", "zhparser.extra_dicts=arknights.txt", "-c", "zhparser.multi_duality=on"]
+    command: ["postgres", "-c", "zhparser.extra_dicts=arknights.txt", "-c", "zhparser.multi_duality=on", "-c", "zhparser.multi_zmain=on"]
     ports:
       - "5432:5432"
     volumes:
