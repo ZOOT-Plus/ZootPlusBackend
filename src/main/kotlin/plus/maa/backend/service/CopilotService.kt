@@ -40,6 +40,7 @@ import plus.maa.backend.service.model.CommentStatus
 import plus.maa.backend.service.model.CopilotSetStatus
 import plus.maa.backend.service.model.CopilotType
 import plus.maa.backend.service.model.RatingType
+import plus.maa.backend.service.recommendation.OperatorRecommendationService
 import plus.maa.backend.service.segment.SegmentService
 import plus.maa.backend.service.sensitiveword.SensitiveWordService
 import java.math.RoundingMode
@@ -71,6 +72,7 @@ class CopilotService(
     private val sensitiveWordService: SensitiveWordService,
     private val segmentService: SegmentService,
     private val siteMessageService: SiteMessageService,
+    private val recommendations: OperatorRecommendationService,
 ) {
     private val log = KotlinLogging.logger { }
 
@@ -149,6 +151,7 @@ class CopilotService(
             notification = false,
         )
         copilotRepository.insertEntity(entity)
+        recommendations.invalidate()
         val copilotId = entity.copilotId
         val opers = dto.opers
         if (!opers.isNullOrEmpty()) {
@@ -502,6 +505,7 @@ class CopilotService(
         copilot.ratingLevel = (ratingLevel * 10).toInt()
         copilot.ratingRatio = ratingLevel
         copilotRepository.updateEntity(copilot)
+        recommendations.invalidate()
 
         // 记录近期评分变化量前 100 的作业 id
         redisCache.incZSet(
@@ -549,6 +553,7 @@ class CopilotService(
         require(copilot.uploaderId == userId) { "您没有权限修改" }
         copilot.apply(edit)
         copilotRepository.updateEntity(copilot)
+        recommendations.invalidate()
         return copilot
     }
 
