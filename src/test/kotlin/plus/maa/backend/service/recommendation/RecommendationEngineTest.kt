@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import plus.maa.backend.common.serialization.defaultJson
 import plus.maa.backend.repository.entity.ArkLevelEntity
 import plus.maa.backend.repository.entity.CopilotEntity
 import plus.maa.backend.service.model.CopilotType
@@ -59,11 +60,11 @@ class RecommendationEngineTest {
     fun `copies never multiply ratings views or independent support`() {
         val original = row(1)
         val one = result(listOf(original))
-        val copies = result(listOf(original) + (2L..100L).map { row(it) })
+        val copies = result(listOf(original) + (2L..100L).map { row(it, views = 1_000_000) })
         assertEquals(1, copies.familyCount)
         assertEquals(one.recommendations.single().score, copies.recommendations.single().score, 1e-9)
         assertEquals(1, copies.recommendations.single().familyCount)
-        assertEquals(1L, copies.recommendations.single().sources.single().id)
+        assertEquals(one.recommendations.single().sources.single(), copies.recommendations.single().sources.single())
     }
 
     @Test
@@ -71,7 +72,11 @@ class RecommendationEngineTest {
         val first = row(1, actions = """[{"type":"Deploy","name":"测试干员","location":[1,2],"direction":"Up","pre_delay":100}]""")
         val second =
             row(2, actions = """[{"direction":"Up","location":[1,2],"name":"测试干员","type":"Deploy","pre_delay":500,"doc":"改了说明"}]""")
-        assertEquals(1, result(listOf(first, second)).familyCount)
+        val one = result(listOf(first)).recommendations.single()
+        val variants = result(listOf(first, second))
+        assertEquals(1, variants.familyCount)
+        assertEquals(one.score, variants.recommendations.single().score, 1e-9)
+        assertEquals(one.sources.single(), variants.recommendations.single().sources.single())
     }
 
     @Test
@@ -159,6 +164,27 @@ class RecommendationEngineTest {
     }
 
     @Test
+    fun `invalid modules are rejected while the default sentinel remains valid`() {
+        listOf(false, true).forEach { v2 ->
+            fun input(module: Int) = row(1, module = module).let {
+                if (v2) it.copy(entity = it.entity.copy(content = it.entity.content.replaceFirst("{", "{\"version\":2,"))) else it
+            }
+            assertNull(result(listOf(input(-1))).recommendations.single().branches.single().target.module)
+            assertEquals(0, result(listOf(input(0))).recommendations.single().branches.single().target.module)
+            listOf(-2, 3, 99).forEach { module ->
+                val invalid = result(listOf(input(module)))
+                assertTrue(invalid.recommendations.isEmpty(), "module=$module, v2=$v2")
+                assertEquals(1, invalid.invalidCount)
+            }
+        }
+        val unmappedCatalog = operator.copy(modules = listOf(0, null, 1))
+        val input = row(1).let { it.copy(entity = it.entity.copy(content = it.entity.content.replaceFirst("{", "{\"version\":2,"))) }
+        val invalid = RecommendationEngine(listOf(unmappedCatalog)).calculate(listOf(input), levels, history, now)
+        assertTrue(invalid.recommendations.isEmpty())
+        assertEquals(1, invalid.invalidCount)
+    }
+
+    @Test
     fun `a fresh copy or a recent edit does not renew an old family`() {
         val old = row(1, age = 1000)
         val copy = row(2, age = 2)
@@ -192,6 +218,19 @@ class RecommendationEngineTest {
         val rows = listOf(row(1, views = 1), row(2, stage = "s2", views = 1_000_000, name = other.name))
         val recommendations = result(rows).recommendations
         assertEquals(recommendations[0].score, recommendations[1].score, 1e-9)
+    }
+
+    @Test
+    fun `permanent and temporary stages sharing a category keep separate budgets`() {
+        val rows = listOf(row(1), row(2, stage = "s2", name = other.name))
+        val mixedLevels = levels.map { if (it.stageId == "s2") it.copy(levelId = "activities/s2") else it }
+        val mixed = engine.calculate(rows, mixedLevels, history, now)
+        val baseline = result(listOf(row(1))).recommendations.single().score
+        val recommendations = mixed.recommendations.associateBy { it.operator.id }
+        assertEquals(baseline * 0.3, recommendations.getValue(operator.id).score, 1e-9)
+        assertEquals(baseline * 0.7, recommendations.getValue(other.id).score, 1e-9)
+        assertTrue(mixed.recommendations.all { it.branches.single().coverage == 1.0 })
+        assertTrue(defaultJson.encodeToString(mixed).isNotBlank())
     }
 
     @Test

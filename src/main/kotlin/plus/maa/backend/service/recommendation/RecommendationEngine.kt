@@ -130,13 +130,13 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator>) {
                 }
             }
         }
-        val categoryStages = selected.map { it.documents.first() }.groupBy { it.stage.catOne.orEmpty() }.mapValues { (_, rows) ->
+        val categoryStages = selected.map { it.documents.first() }.groupBy {
+            isPermanent(it.stage) to it.stage.catOne.orEmpty()
+        }.mapValues { (_, rows) ->
             rows.groupBy { it.stage.catTwo.orEmpty() }.mapValues { (_, stages) -> stages.map(::stageKey).distinct().size }
         }
-        val permanentCategories = selected.map {
-            it.documents.first()
-        }.filter { isPermanent(it.stage) }.map { it.stage.catOne.orEmpty() }.distinct().size
-        val otherCategories = categoryStages.size - permanentCategories
+        val permanentCategories = categoryStages.keys.count { it.first }
+        val otherCategories = categoryStages.keys.count { !it.first }
         val availableBudget = (if (permanentCategories > 0) 0.3 else 0.0) + (if (otherCategories > 0) 0.7 else 0.0)
         val recommendations = samples.groupBy { it.member.operator.id }.mapNotNull { (_, evidence) ->
             val stages = evidence.map { stageKey(it.document) }.distinct()
@@ -160,7 +160,7 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator>) {
             }
             val balanced = evidence.map { sample ->
                 val stage = sample.document.stage
-                val activities = categoryStages.getValue(stage.catOne.orEmpty())
+                val activities = categoryStages.getValue(isPermanent(stage) to stage.catOne.orEmpty())
                 val categoryWeight = (if (isPermanent(stage)) 0.3 / permanentCategories else 0.7 / otherCategories) / availableBudget
                 sample.copy(weight = sample.weight * categoryWeight / activities.size / activities.getValue(stage.catTwo.orEmpty()))
             }
@@ -290,7 +290,12 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator>) {
         val skillLevel = if (operator.rarity <= 2) null else req.number("skill_level")?.takeIf { it > 0 }
         if ((req.number("level") ?: 0) < 0 || (req.number("skill_level") ?: 0) < 0) return null
         val rawModule = req.number("module")
-        val module = (if (version == 2) rawModule?.let { operator.modules.getOrNull(it) } else rawModule)?.takeIf { it >= 0 }
+        val module = when {
+            rawModule == null || rawModule == -1 -> null
+            rawModule < -1 -> return null
+            version == 2 -> operator.modules.getOrNull(rawModule) ?: return null
+            else -> rawModule
+        }
         val caps = levelCaps(operator.rarity)
         if (elite != null && elite !in caps.indices) return null
         if (level != null && level > (elite?.let { caps[it] } ?: caps.max())) return null

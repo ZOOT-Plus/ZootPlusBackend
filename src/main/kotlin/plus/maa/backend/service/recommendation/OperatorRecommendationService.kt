@@ -8,6 +8,7 @@ import plus.maa.backend.repository.entity.ArkLevelEntity
 import plus.maa.backend.repository.ktorm.ArkLevelRepository
 import plus.maa.backend.repository.ktorm.CopilotRepository
 import plus.maa.backend.repository.ktorm.RatingRepository
+import plus.maa.backend.service.level.ArkLevelOpenStatusChangedEvent
 import plus.maa.backend.service.level.ArkLevelsSyncedEvent
 import java.time.Duration
 import java.time.LocalDateTime
@@ -24,29 +25,26 @@ class OperatorRecommendationService(
             requireNotNull(javaClass.getResourceAsStream("/recommendation-operators.json")).bufferedReader().use { it.readText() },
         ),
     )
-    private data class Snapshot(val inputs: List<RecommendationInput>, val levels: List<ArkLevelEntity>, val time: LocalDateTime)
+    private data class Snapshot(val inputs: List<RecommendationInput>, val levels: List<ArkLevelEntity>, val time: LocalDateTime) {
+        val results = Caffeine.newBuilder().maximumSize(64).build<RecommendationQuery, RecommendationResult>()
+    }
     private val snapshots = Caffeine.newBuilder().maximumSize(1).expireAfterWrite(Duration.ofMinutes(15)).build<Int, Snapshot>()
-    private val results = Caffeine.newBuilder().maximumSize(
-        64,
-    ).expireAfterWrite(Duration.ofMinutes(15)).build<RecommendationQuery, RecommendationResult>()
 
-    // ponytail: one lock protects cold builds and invalidation; split by generation if concurrent CPU load warrants it.
-    @Synchronized
     fun recommend(query: RecommendationQuery): RecommendationResult {
-        val snapshot = snapshots.get(0) { load() }
-        val cached = results.getIfPresent(query)
-        if (cached?.generatedAt == snapshot.time.toString()) return cached
-        return engine.calculate(snapshot.inputs, snapshot.levels, query, snapshot.time).also { results.put(query, it) }
+        val snapshot = synchronized(this) { snapshots.get(0) { load() } }
+        return snapshot.results.get(query) { engine.calculate(snapshot.inputs, snapshot.levels, query, snapshot.time) }
     }
 
     @Synchronized
     fun invalidate() {
         snapshots.invalidateAll()
-        results.invalidateAll()
     }
 
     @EventListener
     fun onLevelsChanged(event: ArkLevelsSyncedEvent) = invalidate()
+
+    @EventListener
+    fun onOpenStatusChanged(event: ArkLevelOpenStatusChangedEvent) = invalidate()
 
     private fun load(): Snapshot {
         val rows = mutableListOf<RecommendationInput>()

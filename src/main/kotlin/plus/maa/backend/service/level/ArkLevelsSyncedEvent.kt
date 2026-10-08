@@ -11,7 +11,7 @@ package plus.maa.backend.service.level
  * 采用远长于同步周期的 TTL，由事件保证「更新后立即可见」。新增会改变 v2 响应内容的写路径时，
  * 完成后同样要发布本事件，否则新数据要等缓存 TTL 自然过期才可见。
  *
- * 开放状态批处理（is_open/close_time）**不发**此事件：这两列不进 v2 响应（见
- * `ArkLevelV2Service.digest` 的注释），失效纯属浪费一次全表重算。
+ * 开放状态批处理通过 [ArkLevelOpenStatusChangedEvent] 通知推荐缓存；is_open/close_time
+ * 不进 v2 响应（见 `ArkLevelV2Service.digest`），沿用独立事件。
  */
 data object ArkLevelsSyncedEvent
