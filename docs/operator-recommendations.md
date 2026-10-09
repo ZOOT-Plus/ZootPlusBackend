@@ -59,11 +59,7 @@ Caffeine 缓存一个公开数据快照，15 分钟过期。首次请求或结�
 
 快照创建、更新和失效共用锁，不同查询并发计算，相同查询复用计算结果。计算中的请求使用取得的快照；更新后，新请求使用新的查询缓存。接口响应使用 HTTP `no-store`。
 
-干员目录使用前端已有的生成数据。更新前端干员数据后，在后端根目录运行：
-
-```sh
-node scripts/update-recommendation-catalog.mjs ../zoot-plus-frontend/src/models/generated/operators.json
-```
+干员目录复用 `ArkGameDataHolder` 的游戏资源快照，从 `character_table.json` 读取干员身份、职业和星级，从 `uniequip_table.json` 读取模组类型与顺序。关卡同步和推荐服务共享快照，一天内复用，过期后按需刷新；抓取失败时保留旧快照。推荐数据快照重建时使用最新目录，更新干员数据无需生成文件或重新部署。
 
 ## 本地手动测试
 

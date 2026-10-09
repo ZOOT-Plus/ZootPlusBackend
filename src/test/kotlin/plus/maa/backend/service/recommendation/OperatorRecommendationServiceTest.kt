@@ -1,6 +1,7 @@
 package plus.maa.backend.service.recommendation
 
 import com.github.benmanes.caffeine.cache.Caffeine
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.spyk
@@ -11,9 +12,12 @@ import org.junit.jupiter.api.Test
 import org.springframework.test.util.ReflectionTestUtils
 import plus.maa.backend.repository.entity.ArkLevelEntity
 import plus.maa.backend.repository.entity.CopilotEntity
+import plus.maa.backend.repository.entity.gamedata.ArkCharacter
 import plus.maa.backend.repository.ktorm.ArkLevelRepository
 import plus.maa.backend.repository.ktorm.CopilotRepository
 import plus.maa.backend.repository.ktorm.RatingRepository
+import plus.maa.backend.service.level.ArkGameDataHolder
+import plus.maa.backend.service.level.ArkLevelService
 import java.time.Duration
 import java.time.LocalDateTime
 import java.util.concurrent.CountDownLatch
@@ -26,6 +30,15 @@ class OperatorRecommendationServiceTest {
     private val copilot = mockk<CopilotRepository>()
     private val ratings = mockk<RatingRepository>()
     private val levels = mockk<ArkLevelRepository>()
+    private val levelService = mockk<ArkLevelService>()
+    private val gameData = ArkGameDataHolder(
+        emptyMap(),
+        emptyMap(),
+        emptyMap(),
+        mapOf("angel" to ArkCharacter("能天使", "SNIPER", 5).apply { id = "char_103_angel" }),
+        emptyMap(),
+        emptyMap(),
+    )
     private val row = spyk(
         CopilotEntity(
             copilotId = 1,
@@ -43,7 +56,8 @@ class OperatorRecommendationServiceTest {
         every { copilot.findPublicRecommendationPage(1, 1000) } returns emptyList()
         every { ratings.latestPositiveCopilotTimes(any()) } returns emptyMap()
         every { levels.findAllOrdered() } returns listOf(ArkLevelEntity(stageId = "s1", levelId = "main/s1"))
-        return OperatorRecommendationService(copilot, ratings, levels)
+        coEvery { levelService.gameData() } returns gameData
+        return OperatorRecommendationService(copilot, ratings, levels, levelService)
     }
 
     @Test
@@ -146,6 +160,25 @@ class OperatorRecommendationServiceTest {
         service.refreshFeedback(2)
         verify(exactly = 0) { copilot.findNotDeletedCopilotId(any()) }
         verify(exactly = 1) { copilot.findPublicRecommendationPage(0, 1000) }
+    }
+
+    @Test
+    fun `new game data is used when the recommendation snapshot is rebuilt`() {
+        val service = service()
+        every { copilot.findPublicRecommendationPage(0, 1000) } returns listOf(row.copy(content = row.content.replace("能天使", "新干员")))
+        assertTrue(service.recommend(query).recommendations.isEmpty())
+        coEvery { levelService.gameData() } returns ArkGameDataHolder(
+            emptyMap(),
+            emptyMap(),
+            emptyMap(),
+            mapOf("new" to ArkCharacter("新干员", "SNIPER", 5).apply { id = "char_new" }),
+            emptyMap(),
+            emptyMap(),
+        )
+        service.invalidate()
+        val recommendation = service.recommend(query).recommendations.single()
+        assertEquals("char_new", recommendation.operator.id)
+        assertEquals(6, recommendation.operator.rarity)
     }
 
     @Test

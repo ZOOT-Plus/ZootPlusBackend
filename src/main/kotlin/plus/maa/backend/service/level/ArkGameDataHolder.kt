@@ -11,13 +11,14 @@ import plus.maa.backend.common.serialization.defaultJson
 import plus.maa.backend.repository.entity.gamedata.ArkActivity
 import plus.maa.backend.repository.entity.gamedata.ArkCharacter
 import plus.maa.backend.repository.entity.gamedata.ArkCrisisV2Info
+import plus.maa.backend.repository.entity.gamedata.ArkEquip
 import plus.maa.backend.repository.entity.gamedata.ArkStage
 import plus.maa.backend.repository.entity.gamedata.ArkTower
 import plus.maa.backend.repository.entity.gamedata.ArkZone
 import java.util.Locale
 
 /**
- * 游戏数据快照（stage / zone / activity / character / tower / crisis_v2 六张表）。
+ * 游戏数据快照（stage / zone / activity / character / equip / tower / crisis_v2 七张表）。
  *
  * 构造函数为 internal 而非 private：回填相关的测试需要构造内存快照桩，避免触网。
  */
@@ -28,7 +29,12 @@ class ArkGameDataHolder internal constructor(
     private val arkCharacterMap: Map<String, ArkCharacter>,
     private val arkTowerMap: Map<String, ArkTower>,
     private var arkCrisisV2InfoMap: Map<String, ArkCrisisV2Info>,
+    private val arkEquipMap: Map<String, ArkEquip> = emptyMap(),
 ) {
+    val characters: Collection<ArkCharacter> get() = arkCharacterMap.values
+    private val equipsByCharacter = arkEquipMap.values.groupBy { it.charId }
+    fun findEquips(characterId: String): List<ArkEquip> = equipsByCharacter[characterId].orEmpty()
+
     private val levelStageMap = stageMap.values.mapNotNull { stage -> stage.levelId?.let { it.lowercase() to stage } }.toMap()
 
     fun findStage(levelId: String, code: String?, stageId: String): ArkStage? {
@@ -83,6 +89,7 @@ class ArkGameDataHolder internal constructor(
         private const val ARK_ZONE = "$ARK_RESOURCE_BASE/zone_table.json"
         private const val ARK_ACTIVITY = "$ARK_RESOURCE_BASE/activity_table.json"
         private const val ARK_CHARACTER = "$ARK_RESOURCE_BASE/character_table.json"
+        private const val ARK_EQUIP = "$ARK_RESOURCE_BASE/uniequip_table.json"
         private const val ARK_TOWER = "$ARK_RESOURCE_BASE/climb_tower_table.json"
         private const val ARK_CRISIS_V2 = "$ARK_RESOURCE_BASE/crisis_v2_table.json"
         private val log = KotlinLogging.logger {}
@@ -93,6 +100,7 @@ class ArkGameDataHolder internal constructor(
             val dZoneMap = async { webClient.fetchZones() }
             val dZoneToActivity = async { webClient.fetchActivities() }
             val dCharacterMap = async { webClient.fetchChars() }
+            val dEquipMap = async { webClient.fetchEquips() }
             val dTowerMap = async { webClient.fetchTowers() }
             val dKeyInfoToCrisisV2Info = async { webClient.fetchCrisisV2Info() }
 
@@ -103,6 +111,7 @@ class ArkGameDataHolder internal constructor(
                 arkCharacterMap = dCharacterMap.await(),
                 arkTowerMap = dTowerMap.await(),
                 arkCrisisV2InfoMap = dKeyInfoToCrisisV2Info.await(),
+                arkEquipMap = dEquipMap.await(),
             )
         }
 
@@ -125,6 +134,11 @@ class ArkGameDataHolder internal constructor(
             }
             tmp
         }
+
+        private suspend fun WebClient.fetchEquips() = fetchMapRes<ArkEquipTable, ArkEquip>("equipment", ARK_EQUIP) { it.equipDict }
+
+        @Serializable
+        private data class ArkEquipTable(val equipDict: Map<String, ArkEquip>)
 
         private suspend fun WebClient.fetchZones() = fetchMapRes<ArkZoneTable, ArkZone>("zones", ARK_ZONE) { it.zones }
 

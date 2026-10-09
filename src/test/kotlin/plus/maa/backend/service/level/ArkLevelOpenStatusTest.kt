@@ -1,5 +1,6 @@
 package plus.maa.backend.service.level
 
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.spyk
@@ -16,6 +17,7 @@ import plus.maa.backend.config.external.MaaCopilotProperties
 import plus.maa.backend.repository.TestDbSupport
 import plus.maa.backend.repository.entity.ArkLevelEntity
 import plus.maa.backend.repository.entity.CopilotEntity
+import plus.maa.backend.repository.entity.gamedata.ArkCharacter
 import plus.maa.backend.repository.ktorm.ArkLevelRepository
 import plus.maa.backend.repository.ktorm.CopilotRepository
 import plus.maa.backend.repository.ktorm.RatingRepository
@@ -27,7 +29,21 @@ class ArkLevelOpenStatusTest : TestDbSupport() {
     private val levels = ArkLevelRepository(jdbi)
     private val copilot = CopilotRepository(jdbi)
     private val publisher = mockk<ApplicationEventPublisher>(relaxed = true)
-    private val recommendations = OperatorRecommendationService(copilot, RatingRepository(jdbi), levels)
+    private val recommendations = OperatorRecommendationService(
+        copilot,
+        RatingRepository(jdbi),
+        levels,
+        mockk<ArkLevelService> {
+            coEvery { gameData() } returns ArkGameDataHolder(
+                emptyMap(),
+                emptyMap(),
+                emptyMap(),
+                mapOf("angel" to ArkCharacter("能天使", "SNIPER", 5).apply { id = "char_103_angel" }),
+                emptyMap(),
+                emptyMap(),
+            )
+        },
+    )
 
     private fun service(repository: ArkLevelRepository = levels) = ArkLevelService(
         properties = MaaCopilotProperties(),

@@ -85,30 +85,36 @@ class ArkLevelService(
     @Volatile
     private var dataHolder: ArkGameDataHolder? = null
 
+    @Volatile
+    private var dataHolderLoadedAt: Long = 0
+
     /**
-     * 快照抓取锁。同步任务、每日任务、启动回填都可能触发全量抓取（6 张表合计约 2.4 MB），
+     * 快照抓取锁。同步任务、每日任务、启动回填和推荐查询共用，
      * 串行化以避免并发重复下载。
      *
-     * 注意：持锁期间会发起网络请求（单请求 30s 超时），故已缓存的读路径不取锁。
+     * 持锁期间会发起网络请求（单请求 30s 超时），未过期的快照读取不取锁。
      */
     private val dataHolderMutex = Mutex()
 
     /**
      * 取游戏数据快照。
      *
-     * @param refresh 是否强制重新抓取。为 false 时返回进程内已缓存的快照，未缓存则抓取一次。
+     * @param refresh 是否强制重新抓取。为 false 时复用一天内的快照，未缓存或已过期则抓取一次。
      * @return 快照；强制刷新失败时回退到旧快照（可能为 null 表示从未成功抓取过）。
      *
-     * 抓取失败不抛异常：调用方（回填、开放状态更新）都是兜底任务，用旧快照继续好过整个任务失败。
+     * 抓取失败时返回旧快照；尚无快照时返回 null。
      */
     private suspend fun dataHolder(refresh: Boolean = false): ArkGameDataHolder? {
-        if (!refresh) dataHolder?.let { return it }
+        if (!refresh && System.nanoTime() - dataHolderLoadedAt < Duration.ofDays(1).toNanos()) dataHolder?.let { return it }
         return dataHolderMutex.withLock {
             val cached = dataHolder
             // 双重检查：并发进入时，先到者已抓取完成则直接复用
-            if (cached != null && !refresh) return@withLock cached
+            if (cached != null && !refresh && System.nanoTime() - dataHolderLoadedAt < Duration.ofDays(1).toNanos()) return@withLock cached
             try {
-                ArkGameDataHolder.fetch(webClient).also { dataHolder = it }
+                ArkGameDataHolder.fetch(webClient).also {
+                    dataHolder = it
+                    dataHolderLoadedAt = System.nanoTime()
+                }
             } catch (e: CancellationException) {
                 // 协程取消必须继续传播，否则被取消的任务会继续往下跑
                 throw e
@@ -118,6 +124,8 @@ class ArkLevelService(
             }
         }
     }
+
+    suspend fun gameData(): ArkGameDataHolder = dataHolder() ?: error("游戏数据快照不可用")
 
     @get:Cacheable("arkLevelInfos")
     val arkLevelInfos: List<ArkLevelInfo>
@@ -328,8 +336,8 @@ class ArkLevelService(
      * 标记启动回填已执行，返回是否应跳过本次执行（24h 内已执行过）。
      *
      * 用 [RedisCache.setCacheIfAbsent] 的原子性替代「先查后写」两步：本方法由启动触发调用，
-     * 多副本部署或重复触发时，只有一个执行能拿到「首次」标记，其余直接跳过，避免重复抓取快照
-     * （实测 6 张表约 2.4 MB）与重复解析。
+     * 多副本部署或重复触发时，只有一个执行能拿到「首次」标记，其余直接跳过，避免重复下载
+     * 游戏资源表和解析地图。
      *
      * 注意 [RedisCache.setCacheIfAbsent] 的返回值是「key 是否已存在」，而非 Spring Data Redis
      * `ValueOperations.setIfAbsent` 的「是否写入成功」——两者语义相反（见 `RedisCache.kt` 中带
