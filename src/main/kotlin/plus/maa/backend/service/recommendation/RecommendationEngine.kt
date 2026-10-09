@@ -35,15 +35,38 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator>) {
         val skeleton: String,
         val variant: String,
     )
-    internal data class Family(val documents: MutableList<Document>) {
-        val firstPublishedAt: LocalDateTime get() = documents.minOf { it.input.entity.firstUploadTime }
-        val variants: List<Document> get() = documents.groupBy { it.variant }.values.map { copies ->
+    internal data class Family(val documents: List<Document>) {
+        val firstPublishedAt: LocalDateTime = documents.minOf { it.input.entity.firstUploadTime }
+        val variants: List<Document> = documents.groupBy { it.variant }.values.map { copies ->
             // Copies are correlated evidence. Keep one evaluation, never add their votes or views.
             copies.sortedWith(
                 compareByDescending<Document> {
                     it.input.entity.likeCount + it.input.entity.dislikeCount
                 }.thenBy { it.input.entity.copilotId },
             ).first()
+        }
+    }
+    internal data class Prepared(
+        val documentsById: Map<Long, Document>,
+        val families: List<Family>,
+        val familyIndexById: Map<Long, Int>,
+        val invalidCount: Int,
+        val categories: List<String>,
+        val activities: List<String>,
+        val stages: List<RecommendationStage>,
+    ) {
+        fun withFeedback(input: RecommendationInput): Prepared {
+            val id = input.entity.copilotId
+            val previous = documentsById[id] ?: return this
+            val updated = previous.copy(input = input)
+            val index = familyIndexById.getValue(id)
+            val family = families[index]
+            return copy(
+                documentsById = documentsById + (id to updated),
+                families = families.toMutableList().apply {
+                    this[index] = Family(family.documents.map { if (it === previous) updated else it })
+                },
+            )
         }
     }
     private data class Sample(
@@ -60,7 +83,9 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator>) {
         levels: List<ArkLevelEntity>,
         query: RecommendationQuery,
         now: LocalDateTime,
-    ): RecommendationResult {
+    ): RecommendationResult = calculate(prepare(inputs, levels), query, now)
+
+    fun prepare(inputs: List<RecommendationInput>, levels: List<ArkLevelEntity>): Prepared {
         val levelIndex = buildMap {
             levels.forEach { level ->
                 listOfNotNull(level.stageId, level.levelId, level.catThree).filter {
@@ -74,20 +99,36 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator>) {
         }
         // Anchor clusters avoid transitive chains merging substantially different strategies.
         val families = documents.groupBy { "${it.stage.stageId}|${it.difficulty}|${it.skeleton}" }.values.flatMap { bucket ->
-            val clusters = mutableListOf<Family>()
+            val clusters = mutableListOf<MutableList<Document>>()
             bucket.sortedBy { it.input.entity.firstUploadTime }.forEach { document ->
                 val identities = document.members.map { it.operator.id }.toSet()
                 val match = clusters.firstOrNull { cluster ->
-                    val anchor = cluster.documents.first().members.map { it.operator.id }.toSet()
+                    val anchor = cluster.first().members.map { it.operator.id }.toSet()
                     2.0 * identities.intersect(anchor).size / (identities.size + anchor.size).coerceAtLeast(1) >= 0.85
                 }
-                if (match == null) clusters.add(Family(mutableListOf(document))) else match.documents.add(document)
+                if (match == null) clusters.add(mutableListOf(document)) else match.add(document)
             }
-            clusters
+            clusters.map { Family(it.toList()) }
         }
+        return Prepared(
+            documentsById = documents.associateBy { it.input.entity.copilotId },
+            families = families,
+            familyIndexById = buildMap {
+                families.forEachIndexed { index, family -> family.documents.forEach { put(it.input.entity.copilotId, index) } }
+            },
+            invalidCount = invalid,
+            categories = documents.mapNotNull { it.stage.catOne }.filter { it.isNotBlank() }.distinct().sorted(),
+            activities = documents.mapNotNull { it.stage.catTwo }.filter { it.isNotBlank() }.distinct().sorted(),
+            stages = documents.map {
+                RecommendationStage(it.stage.stageId.orEmpty(), listOfNotNull(it.stage.catThree, it.stage.name).joinToString(" "))
+            }.distinctBy { it.id }.sortedBy { it.name },
+        )
+    }
+
+    fun calculate(prepared: Prepared, query: RecommendationQuery, now: LocalDateTime): RecommendationResult {
         val window = if (query.days == 0) 180 else query.days
         val cutoff = now.minusDays(window.toLong())
-        val selected = families.filter { family ->
+        val selected = prepared.families.filter { family ->
             val stage = family.documents.first().stage
             val permanent = isPermanent(stage)
             val recent =
@@ -195,12 +236,10 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator>) {
             generatedAt = now.toString(),
             operationCount = selected.sumOf { it.documents.size },
             familyCount = selected.size,
-            invalidCount = invalid,
-            categories = documents.mapNotNull { it.stage.catOne }.filter { it.isNotBlank() }.distinct().sorted(),
-            activities = documents.mapNotNull { it.stage.catTwo }.filter { it.isNotBlank() }.distinct().sorted(),
-            stages = documents.map {
-                RecommendationStage(it.stage.stageId.orEmpty(), listOfNotNull(it.stage.catThree, it.stage.name).joinToString(" "))
-            }.distinctBy { it.id }.sortedBy { it.name },
+            invalidCount = prepared.invalidCount,
+            categories = prepared.categories,
+            activities = prepared.activities,
+            stages = prepared.stages,
             recommendations = recommendations,
         )
     }

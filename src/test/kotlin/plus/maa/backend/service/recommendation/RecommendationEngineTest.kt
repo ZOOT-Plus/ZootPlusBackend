@@ -2,6 +2,7 @@ package plus.maa.backend.service.recommendation
 
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import plus.maa.backend.common.serialization.defaultJson
@@ -55,6 +56,39 @@ class RecommendationEngineTest {
         )
     }
     private fun result(rows: List<RecommendationInput>, query: RecommendationQuery = history) = engine.calculate(rows, levels, query, now)
+
+    @Test
+    fun `prepared feedback refresh matches a full rebuild and leaves the previous snapshot intact`() {
+        val original = row(1, age = 400)
+        val copy = row(2, age = 380, likes = 10, dislikes = 1, views = 10_000)
+        val differentVariant = row(3, age = 390, level = 90)
+        val independent = row(4, stage = "s2")
+        val invalid = row(5).let { it.copy(entity = it.entity.copy(content = "{")) }
+        val rows = listOf(original, copy, differentVariant, independent, invalid)
+        val prepared = engine.prepare(rows, levels)
+        val queries = RecommendationScope.entries.flatMap { scope ->
+            listOf(0, 7, 180).flatMap { days ->
+                listOf(0.6, 0.8, 0.9).map { coverage ->
+                    RecommendationQuery(scope = scope, days = days, coverage = coverage)
+                }
+            }
+        } + listOf(history.copy(stageId = "s1"), RecommendationQuery(stageId = "s1"), history.copy(category = "主题曲"))
+        val initial = queries.map { engine.calculate(prepared, it, now) }
+        val feedback = copy.copy(entity = copy.entity.copy(likeCount = 200, views = 20_000), latestPositiveAt = now)
+        val refreshed = prepared.withFeedback(feedback)
+        assertEquals(2L, refreshed.families.first().variants.first().input.entity.copilotId)
+        assertSame(prepared.families.last(), refreshed.families.last())
+        queries.forEachIndexed { index, query ->
+            assertEquals(result(rows.map { if (it === copy) feedback else it }, query), engine.calculate(refreshed, query, now))
+            assertEquals(initial[index], engine.calculate(prepared, query, now))
+        }
+        val cancelled = feedback.copy(entity = feedback.entity.copy(likeCount = 0, dislikeCount = 0), latestPositiveAt = null)
+        val reverted = refreshed.withFeedback(cancelled)
+        assertEquals(1L, reverted.families.first().variants.first().input.entity.copilotId)
+        queries.forEach { query ->
+            assertEquals(result(rows.map { if (it === copy) cancelled else it }, query), engine.calculate(reverted, query, now))
+        }
+    }
 
     @Test
     fun `copies never multiply ratings views or independent support`() {

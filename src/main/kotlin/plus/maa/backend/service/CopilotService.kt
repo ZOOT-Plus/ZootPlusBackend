@@ -175,6 +175,7 @@ class CopilotService(
         delete = true
         deleteTime = LocalDateTime.now()
     }.apply {
+        recommendations.invalidate()
         // 删除作业时，如果被删除的项在 Redis 首页缓存中存在，则清空对应的首页缓存
         // 新增作业就不必，因为新作业显然不会那么快就登上热度榜和浏览量榜
         deleteCacheWhenMatchCopilotId(copilotId)
@@ -461,6 +462,7 @@ class CopilotService(
             status = request.status
             uploadTime = LocalDateTime.now()
         }.apply {
+            recommendations.invalidate()
             Cache.invalidateCopilotInfoByCid(copilotId)
             segmentService.updateIndex(copilotId, title, details)
             copilotRepository.replaceOperators(copilotId, dto.opers?.map { it.name } ?: emptyList())
@@ -491,6 +493,7 @@ class CopilotService(
         // 获取作业
         val copilot = copilotRepository.findNotDeletedCopilotId(request.id)
         checkNotNull(copilot) { "作业不存在" }
+        if (likeCountChange == 0L && dislikeCountChange == 0L) return
 
         // 计算评分相关
         val likeCount = (copilot.likeCount + likeCountChange).coerceAtLeast(0)
@@ -505,7 +508,7 @@ class CopilotService(
         copilot.ratingLevel = (ratingLevel * 10).toInt()
         copilot.ratingRatio = ratingLevel
         copilotRepository.updateEntity(copilot)
-        recommendations.invalidate()
+        recommendations.refreshFeedback(request.id)
 
         // 记录近期评分变化量前 100 的作业 id
         redisCache.incZSet(
@@ -553,7 +556,6 @@ class CopilotService(
         require(copilot.uploaderId == userId) { "您没有权限修改" }
         copilot.apply(edit)
         copilotRepository.updateEntity(copilot)
-        recommendations.invalidate()
         return copilot
     }
 
