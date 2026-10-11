@@ -7,6 +7,8 @@ import io.mockk.mockk
 import io.mockk.spyk
 import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertSame
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.springframework.test.util.ReflectionTestUtils
@@ -22,8 +24,11 @@ import java.time.Duration
 import java.time.LocalDateTime
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit.MILLISECONDS
 import java.util.concurrent.TimeUnit.SECONDS
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 
 class OperatorRecommendationServiceTest {
@@ -71,6 +76,46 @@ class OperatorRecommendationServiceTest {
     }
 
     @Test
+    fun `equivalent filters share the same cached result`() {
+        val service = service()
+        val initial = service.recommend(query)
+        assertSame(initial, service.recommend(query.copy(stageId = " s1 ", category = "", activity = " ", days = 0)))
+    }
+
+    @Test
+    fun `different uncached queries have bounded concurrency while cached reads remain available`() {
+        val service = service()
+        val cached = service.recommend(query)
+        val entered = CountDownLatch(2)
+        val release = CountDownLatch(1)
+        val calls = AtomicInteger()
+        val likes = row.likeCount
+        every { row.likeCount } answers {
+            if (calls.incrementAndGet() <= 2) {
+                entered.countDown()
+                check(release.await(10, SECONDS))
+            }
+            likes
+        }
+        Executors.newFixedThreadPool(3).use { executor ->
+            val first = executor.submit<RecommendationResult> { service.recommend(query.copy(coverage = 0.6)) }
+            val second = executor.submit<RecommendationResult> { service.recommend(query.copy(coverage = 0.9)) }
+            try {
+                assertTrue(entered.await(5, SECONDS))
+                val third = executor.submit<RecommendationResult> { service.recommend(query.copy(coverage = 0.7)) }
+                assertThrows(TimeoutException::class.java) { third.get(100, MILLISECONDS) }
+                assertSame(cached, service.recommend(query))
+                release.countDown()
+                assertEquals(1, third.get(5, SECONDS).recommendations.size)
+            } finally {
+                release.countDown()
+            }
+            assertEquals(1, first.get(5, SECONDS).recommendations.size)
+            assertEquals(1, second.get(5, SECONDS).recommendations.size)
+        }
+    }
+
+    @Test
     fun `calculations allow other queries and invalidation without caching stale results`() {
         val service = service()
         val cached = service.recommend(query)
@@ -93,7 +138,7 @@ class OperatorRecommendationServiceTest {
                 assertEquals(cached, executor.submit<RecommendationResult> { service.recommend(query) }.get(5, SECONDS))
                 val other = executor.submit<RecommendationResult> { service.recommend(query.copy(coverage = 0.6)) }.get(5, SECONDS)
                 assertEquals(1, other.recommendations.size)
-                every { copilot.findNotDeletedCopilotId(1) } returns row.copy(likeCount = 1, dislikeCount = 99)
+                every { copilot.findRecommendationFeedback(1) } returns row.copy(likeCount = 1, dislikeCount = 99)
                 val fresh = executor.submit<RecommendationResult> {
                     service.refreshFeedback(1)
                     service.recommend(uncached)
@@ -118,7 +163,7 @@ class OperatorRecommendationServiceTest {
         val initial = service.recommend(query)
         assertEquals(initial, service.recommend(query.copy(coverage = 0.9)))
         verify(exactly = 1) { row.content }
-        every { copilot.findNotDeletedCopilotId(1) } returns row.copy(likeCount = 1, dislikeCount = 99)
+        every { copilot.findRecommendationFeedback(1) } returns row.copy(likeCount = 1, dislikeCount = 99)
 
         service.refreshFeedback(1)
 
@@ -126,7 +171,7 @@ class OperatorRecommendationServiceTest {
         assertTrue(service.recommend(query.copy(coverage = 0.9)).recommendations.isEmpty())
         verify(exactly = 1) { copilot.findPublicRecommendationPage(0, 1000) }
         verify(exactly = 1) { levels.findAllOrdered() }
-        verify(exactly = 1) { copilot.findNotDeletedCopilotId(1) }
+        verify(exactly = 1) { copilot.findRecommendationFeedback(1) }
         verify(exactly = 2) { ratings.latestPositiveCopilotTimes(listOf("1")) }
         verify(exactly = 1) { row.content }
     }
@@ -142,7 +187,7 @@ class OperatorRecommendationServiceTest {
         )
         val initial = service.recommend(query)
         ticks.set(Duration.ofMinutes(14).toNanos())
-        every { copilot.findNotDeletedCopilotId(1) } returns row.copy(likeCount = 1, dislikeCount = 99)
+        every { copilot.findRecommendationFeedback(1) } returns row.copy(likeCount = 1, dislikeCount = 99)
         service.refreshFeedback(1)
         assertTrue(service.recommend(query).recommendations.isEmpty())
 
@@ -158,7 +203,7 @@ class OperatorRecommendationServiceTest {
         verify(exactly = 0) { copilot.findPublicRecommendationPage(any(), any()) }
         service.recommend(query)
         service.refreshFeedback(2)
-        verify(exactly = 0) { copilot.findNotDeletedCopilotId(any()) }
+        verify(exactly = 0) { copilot.findRecommendationFeedback(any()) }
         verify(exactly = 1) { copilot.findPublicRecommendationPage(0, 1000) }
     }
 
@@ -185,7 +230,7 @@ class OperatorRecommendationServiceTest {
     fun `feedback refresh discards a snapshot if the operation has been removed`() {
         val service = service()
         service.recommend(query)
-        every { copilot.findNotDeletedCopilotId(1) } returns null
+        every { copilot.findRecommendationFeedback(1) } returns null
         every { copilot.findPublicRecommendationPage(0, 1000) } returns emptyList()
         service.refreshFeedback(1)
         assertTrue(service.recommend(query).recommendations.isEmpty())

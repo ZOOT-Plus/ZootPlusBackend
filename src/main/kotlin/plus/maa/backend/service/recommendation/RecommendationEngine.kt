@@ -10,8 +10,10 @@ import kotlinx.serialization.json.intOrNull
 import plus.maa.backend.repository.entity.ArkLevelEntity
 import plus.maa.backend.service.level.ArkLevelType
 import plus.maa.backend.service.model.CopilotType
+import java.security.MessageDigest
 import java.time.LocalDateTime
 import java.time.temporal.ChronoUnit
+import java.util.HexFormat
 import kotlin.math.ln
 import kotlin.math.pow
 import kotlin.math.sqrt
@@ -34,22 +36,25 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator>) {
         val members: List<Member>,
         val skeleton: String,
         val variant: String,
-    )
+    ) {
+        val stageKey = "${stage.stageId}|$difficulty"
+        val permanent = isPermanent(stage)
+    }
     internal data class Family(val documents: List<Document>) {
         val firstPublishedAt: LocalDateTime = documents.minOf { it.input.entity.firstUploadTime }
         val variants: List<Document> = documents.groupBy { it.variant }.values.map { copies ->
             // Copies are correlated evidence. Keep one evaluation, never add their votes or views.
-            copies.sortedWith(
+            copies.minWith(
                 compareByDescending<Document> {
                     it.input.entity.likeCount + it.input.entity.dislikeCount
                 }.thenBy { it.input.entity.copilotId },
-            ).first()
+            )
         }
     }
     internal data class Prepared(
-        val documentsById: Map<Long, Document>,
         val families: List<Family>,
         val familyIndexById: Map<Long, Int>,
+        val familyIndexesByStage: Map<String, List<Int>>,
         val invalidCount: Int,
         val categories: List<String>,
         val activities: List<String>,
@@ -57,14 +62,11 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator>) {
     ) {
         fun withFeedback(input: RecommendationInput): Prepared {
             val id = input.entity.copilotId
-            val previous = documentsById[id] ?: return this
-            val updated = previous.copy(input = input)
-            val index = familyIndexById.getValue(id)
+            val index = familyIndexById[id] ?: return this
             val family = families[index]
             return copy(
-                documentsById = documentsById + (id to updated),
                 families = families.toMutableList().apply {
-                    this[index] = Family(family.documents.map { if (it === previous) updated else it })
+                    this[index] = Family(family.documents.map { if (it.input.entity.copilotId == id) it.copy(input = input) else it })
                 },
             )
         }
@@ -77,6 +79,7 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator>) {
         val recent: Boolean,
         val quality: Double,
     )
+    private data class FamilyEvidence(var quality: Sample, var source: Sample)
 
     fun calculate(
         inputs: List<RecommendationInput>,
@@ -94,33 +97,43 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator>) {
             }
         }
         var invalid = 0
+        val digest = MessageDigest.getInstance("SHA-256")
         val documents = inputs.filter { it.entity.type == CopilotType.PRTS }.mapNotNull { input ->
-            parse(input, levelIndex).also { if (it == null) invalid++ }
+            parse(input, levelIndex, digest).also { if (it == null) invalid++ }
         }
         // Anchor clusters avoid transitive chains merging substantially different strategies.
         val families = documents.groupBy { "${it.stage.stageId}|${it.difficulty}|${it.skeleton}" }.values.flatMap { bucket ->
-            val clusters = mutableListOf<MutableList<Document>>()
+            val clusters = mutableListOf<Pair<Set<String>, MutableList<Document>>>()
             bucket.sortedBy { it.input.entity.firstUploadTime }.forEach { document ->
                 val identities = document.members.map { it.operator.id }.toSet()
-                val match = clusters.firstOrNull { cluster ->
-                    val anchor = cluster.first().members.map { it.operator.id }.toSet()
-                    2.0 * identities.intersect(anchor).size / (identities.size + anchor.size).coerceAtLeast(1) >= 0.85
+                val match = clusters.firstOrNull { (anchor, _) ->
+                    2.0 * identities.count { it in anchor } / (identities.size + anchor.size).coerceAtLeast(1) >= 0.85
                 }
-                if (match == null) clusters.add(mutableListOf(document)) else match.add(document)
+                if (match == null) clusters.add(identities to mutableListOf(document)) else match.second.add(document)
             }
-            clusters.map { Family(it.toList()) }
+            clusters.map { Family(it.second.toList()) }
         }
         return Prepared(
-            documentsById = documents.associateBy { it.input.entity.copilotId },
             families = families,
             familyIndexById = buildMap {
                 families.forEachIndexed { index, family -> family.documents.forEach { put(it.input.entity.copilotId, index) } }
+            },
+            familyIndexesByStage = buildMap<String, MutableList<Int>> {
+                families.forEachIndexed { index, family ->
+                    val stage = family.documents.first().stage
+                    listOfNotNull(stage.stageId, stage.levelId).distinct().forEach { key -> getOrPut(key) { mutableListOf() }.add(index) }
+                }
             },
             invalidCount = invalid,
             categories = documents.mapNotNull { it.stage.catOne }.filter { it.isNotBlank() }.distinct().sorted(),
             activities = documents.mapNotNull { it.stage.catTwo }.filter { it.isNotBlank() }.distinct().sorted(),
             stages = documents.map {
-                RecommendationStage(it.stage.stageId.orEmpty(), listOfNotNull(it.stage.catThree, it.stage.name).joinToString(" "))
+                RecommendationStage(
+                    it.stage.stageId.orEmpty(),
+                    listOfNotNull(it.stage.catThree, it.stage.name).joinToString(" "),
+                    it.stage.catOne,
+                    it.stage.catTwo,
+                )
             }.distinctBy { it.id }.sortedBy { it.name },
         )
     }
@@ -128,11 +141,16 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator>) {
     fun calculate(prepared: Prepared, query: RecommendationQuery, now: LocalDateTime): RecommendationResult {
         val window = if (query.days == 0) 180 else query.days
         val cutoff = now.minusDays(window.toLong())
-        val selected = prepared.families.filter { family ->
+        val candidates = query.stageId?.takeIf { it.isNotBlank() }?.let { id ->
+            prepared.familyIndexesByStage[id].orEmpty().map { prepared.families[it] }
+        } ?: prepared.families
+        val selected = candidates.filter { family ->
             val stage = family.documents.first().stage
-            val permanent = isPermanent(stage)
-            val recent =
-                family.firstPublishedAt >= cutoff || family.variants.any { (it.input.latestPositiveAt ?: LocalDateTime.MIN) >= cutoff }
+            val permanent = family.documents.first().permanent
+            val recent = family.firstPublishedAt >= cutoff || family.variants.any {
+                (it.input.latestPositiveAt ?: LocalDateTime.MIN) >= cutoff &&
+                    wilson(it.input.entity.likeCount, it.input.entity.dislikeCount).first >= 0.5
+            }
             (query.includeClosed || stage.isOpen != false || permanent) &&
                 (query.stageId.isNullOrBlank() || query.stageId == stage.stageId || query.stageId == stage.levelId) &&
                 (query.category.isNullOrBlank() || query.category == stage.catOne) &&
@@ -146,14 +164,27 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator>) {
         val stageFamilies = selected.groupingBy { stageKey(it.documents.first()) }.eachCount()
         val exposure = selected.flatMap { it.variants }.groupBy { "${stageKey(it)}|${ageBucket(it.input.entity.firstUploadTime, now)}" }
             .mapValues { (_, rows) -> rows.map { ln(1.0 + it.input.entity.views.coerceAtLeast(0)) }.sorted().let { it[it.size / 2] } }
-        val samples = selected.flatMapIndexed { familyId, family ->
+        val stageDocuments = selected.map { it.documents.first() }.distinctBy(::stageKey)
+        val categoryStages = stageDocuments.groupBy { it.permanent to it.stage.catOne.orEmpty() }.mapValues { (_, rows) ->
+            rows.groupingBy { it.stage.catTwo.orEmpty() }.eachCount()
+        }
+        val permanentCategories = categoryStages.keys.count { it.first }
+        val otherCategories = categoryStages.keys.count { !it.first }
+        val availableBudget = (if (permanentCategories > 0) 0.3 else 0.0) + (if (otherCategories > 0) 0.7 else 0.0)
+        val stageWeights = stageDocuments.associate { document ->
+            val activities = categoryStages.getValue(document.permanent to document.stage.catOne.orEmpty())
+            val categoryWeight = (if (document.permanent) 0.3 / permanentCategories else 0.7 / otherCategories) / availableBudget
+            stageKey(document) to categoryWeight / activities.size / activities.getValue(document.stage.catTwo.orEmpty())
+        }
+        val samples = mutableMapOf<String, MutableList<Sample>>()
+        selected.forEachIndexed { familyId, family ->
             val variants = family.variants
-            variants.flatMap { document ->
+            variants.forEach { document ->
                 val row = document.input.entity
                 val (lower, upper) = wilson(row.likeCount, row.dislikeCount)
-                if (upper < 0.6) return@flatMap emptyList()
+                if (upper < 0.6) return@forEach
                 val provisional = row.likeCount + row.dislikeCount == 0L
-                if (provisional && !query.includeUncertain) return@flatMap emptyList()
+                if (provisional && !query.includeUncertain) return@forEach
                 val quality = if (provisional) 0.05 else lower
                 val ageHours = ChronoUnit.HOURS.between(family.firstPublishedAt, now).coerceAtLeast(0).toDouble()
                 val mature = 0.25 + 0.75 * (ageHours / 72.0).coerceIn(0.0, 1.0)
@@ -166,57 +197,70 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator>) {
                 val viewAdjustment = if (baseline <= 0.0) 1.0 else (ln(1.0 + row.views.coerceAtLeast(0)) / baseline).coerceIn(0.9, 1.1)
                 val recent = family.firstPublishedAt >= cutoff || (lower >= 0.5 && feedback != null && feedback >= cutoff)
                 val weight = quality * mature * recency * viewAdjustment / variants.size / stageFamilies.getValue(stageKey(document))
-                document.members.filter { query.includeAlternatives || !it.alternative }.map { member ->
-                    Sample(document, member, familyId, weight * member.share, recent, lower)
+                val balance = stageWeights.getValue(stageKey(document))
+                for (member in document.members) {
+                    if (query.includeAlternatives || !member.alternative) {
+                        samples.getOrPut(member.operator.id) { mutableListOf() }
+                            .add(Sample(document, member, familyId, weight * member.share * balance, recent, lower))
+                    }
                 }
             }
         }
-        val categoryStages = selected.map { it.documents.first() }.groupBy {
-            isPermanent(it.stage) to it.stage.catOne.orEmpty()
-        }.mapValues { (_, rows) ->
-            rows.groupBy { it.stage.catTwo.orEmpty() }.mapValues { (_, stages) -> stages.map(::stageKey).distinct().size }
-        }
-        val permanentCategories = categoryStages.keys.count { it.first }
-        val otherCategories = categoryStages.keys.count { !it.first }
-        val availableBudget = (if (permanentCategories > 0) 0.3 else 0.0) + (if (otherCategories > 0) 0.7 else 0.0)
-        val recommendations = samples.groupBy { it.member.operator.id }.mapNotNull { (_, evidence) ->
-            val stages = evidence.map { stageKey(it.document) }.distinct()
-            val recent = evidence.filter { it.recent && it.quality > 0.0 }
-            val recentStages = recent.map { stageKey(it.document) }.distinct().size
-            val recentFamilies = recent.map { it.family }.distinct().size
-            val independent = evidence.groupBy { it.family }.values.map { family -> family.maxBy { it.quality } }
+        val recommendations = samples.values.mapNotNull { evidence ->
+            val stages = mutableSetOf<String>()
+            val recentStages = mutableSetOf<String>()
+            val recentFamilies = mutableSetOf<Int>()
+            val independent = mutableMapOf<Int, FamilyEvidence>()
+            evidence.forEach { sample ->
+                stages.add(stageKey(sample.document))
+                if (sample.recent && sample.quality > 0.0) {
+                    recentStages.add(stageKey(sample.document))
+                    recentFamilies.add(sample.family)
+                }
+                val family = independent[sample.family]
+                if (family == null) {
+                    independent[sample.family] = FamilyEvidence(sample, sample)
+                } else {
+                    if (sample.quality > family.quality.quality) family.quality = sample
+                    if (sample.weight > family.source.weight) family.source = sample
+                }
+            }
             val (qualityFloor, _) = wilson(
-                independent.sumOf { it.document.input.entity.likeCount },
-                independent.sumOf { it.document.input.entity.dislikeCount },
+                independent.values.sumOf { it.quality.document.input.entity.likeCount },
+                independent.values.sumOf { it.quality.document.input.entity.dislikeCount },
             )
             val strong = qualityFloor >= 0.5
             val focused = !query.stageId.isNullOrBlank() || !query.activity.isNullOrBlank()
-            val current = strong && recentStages >= (if (focused) 1 else 2) && recentFamilies >= (if (focused) 1 else 3)
+            val current = strong && recentStages.size >= (if (focused) 1 else 2) && recentFamilies.size >= (if (focused) 1 else 3)
             if (query.scope == RecommendationScope.RECENT && !query.includeUncertain && !current) return@mapNotNull null
             val status = when {
                 !strong -> "INSUFFICIENT"
                 current -> "CURRENT"
-                recentFamilies > 0 -> "LIMITED"
+                recentFamilies.isNotEmpty() -> "LIMITED"
                 else -> "HISTORICAL"
             }
-            val balanced = evidence.map { sample ->
-                val stage = sample.document.stage
-                val activities = categoryStages.getValue(isPermanent(stage) to stage.catOne.orEmpty())
-                val categoryWeight = (if (isPermanent(stage)) 0.3 / permanentCategories else 0.7 / otherCategories) / availableBudget
-                sample.copy(weight = sample.weight * categoryWeight / activities.size / activities.getValue(stage.catTwo.orEmpty()))
-            }
-            val weight = balanced.sumOf { it.weight }
+            val weight = evidence.sumOf { it.weight }
             if (weight <= 0.0) return@mapNotNull null
+            val sources = mutableListOf<Sample>()
+            independent.values.forEach { family ->
+                val position = sources.indexOfFirst { it.weight < family.source.weight }
+                if (position >= 0) {
+                    sources.add(position, family.source)
+                } else if (sources.size < 5) {
+                    sources.add(family.source)
+                }
+                if (sources.size > 5) sources.removeLast()
+            }
             OperatorRecommendation(
                 operator = evidence.first().member.operator,
                 score = (100.0 * weight).coerceAtMost(100.0),
                 stageCount = stages.size,
-                familyCount = evidence.map { it.family }.distinct().size,
-                recentStageCount = recentStages,
-                recentFamilyCount = recentFamilies,
+                familyCount = independent.size,
+                recentStageCount = recentStages.size,
+                recentFamilyCount = recentFamilies.size,
                 status = status,
-                branches = branches(balanced, query.coverage),
-                sources = balanced.sortedByDescending { it.weight }.distinctBy { it.family }.take(5).map { sample ->
+                branches = branches(evidence, query.coverage),
+                sources = sources.map { sample ->
                     val row = sample.document.input.entity
                     RecommendationSource(
                         id = row.copilotId,
@@ -244,28 +288,30 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator>) {
         )
     }
 
-    private fun parse(input: RecommendationInput, levels: Map<String, ArkLevelEntity>): Document? {
+    private fun parse(input: RecommendationInput, levels: Map<String, ArkLevelEntity>, digest: MessageDigest): Document? {
         val root = runCatching { json.parseToJsonElement(input.entity.content) as? JsonObject }.getOrNull() ?: return null
         val stageName = root.string("stage_name") ?: input.entity.stageName
         val stage =
             levels[input.entity.stageName.lowercase()] ?: levels[stageName.lowercase()]
                 ?: ArkLevelEntity(stageId = stageName, catOne = "未知类型", catTwo = stageName)
-        val members = mutableListOf<Member>()
+        val slots = mutableListOf<List<Member>>()
         val aliases = mutableMapOf<String, String>()
         val fixed = root.array("opers").mapNotNull { parseMember(it as? JsonObject, root.number("version")) }
         fixed.forEach { member -> aliases[member.operator.name] = member.operator.id }
-        members.addAll(fixed)
+        slots.add(fixed)
         root.array("groups").forEach { element ->
             val group = element as? JsonObject ?: return@forEach
-            val alternatives = group.array("opers")
-            val candidates = alternatives.mapNotNull {
+            val alternatives = group.array("opers").map {
                 parseMember(it as? JsonObject, root.number("version"))
-            }.distinctBy { it.operator.id }
+            }
+            val candidates = alternatives.filterNotNull().distinctBy { it.operator.id to it.target }
             if (candidates.isNotEmpty()) {
-                members.addAll(candidates.map { it.copy(share = 1.0 / alternatives.size, alternative = true) })
-                group.string("name")?.let { aliases[it] = candidates.map { it.operator.id }.sorted().joinToString(",") }
+                val count = candidates.size + alternatives.count { it == null }
+                slots.add(candidates.map { it.copy(share = 1.0 / count, alternative = true) })
+                group.string("name")?.let { aliases[it] = candidates.map { it.operator.id }.distinct().sorted().joinToString(",") }
             }
         }
+        val members = slots.flatten()
         if (members.isEmpty() || stageName.isBlank()) return null
         val actors = mutableMapOf<String, Int>()
         val ignored = setOf("doc", "doc_color", "_id")
@@ -297,7 +343,17 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator>) {
                 ).joinToString(":")
             }
         }
-        val unique = members.groupBy { it.operator.id }.values.map { candidates -> candidates.maxBy { it.share } }
+        val unique = slots.flatMapIndexed { index, slot ->
+            slot.map { index to it }
+        }.groupBy { it.second.operator.id }.values.flatMap { entries ->
+            val required = entries.firstOrNull { !it.second.alternative }
+            if (required != null) {
+                listOf(required.second)
+            } else {
+                // Repeated slots count once, while different training choices within that slot retain their shares.
+                entries.groupBy { it.first }.values.maxBy { slot -> slot.sumOf { it.second.share } }.map { it.second }
+            }
+        }
         val controls = (root.array("opers") + root.array("groups").flatMap { (it as? JsonObject)?.array("opers").orEmpty() })
             .mapNotNull { it as? JsonObject }.map { oper ->
                 listOf(
@@ -314,7 +370,8 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator>) {
         }
         val variant = controls.toString() + unique.sortedBy { it.operator.id }
             .joinToString { "${it.operator.id}|${it.target}|${it.share}|${it.alternative}" } + executable.joinToString()
-        return Document(input, stage, root.number("difficulty") ?: 0, unique, skeleton, variant)
+        fun fingerprint(value: String) = HexFormat.of().formatHex(digest.digest(value.toByteArray(Charsets.UTF_8)))
+        return Document(input, stage, root.number("difficulty") ?: 0, unique, fingerprint(skeleton), fingerprint(variant))
     }
 
     private fun parseMember(value: JsonObject?, version: Int?): Member? {
@@ -332,6 +389,7 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator>) {
         val module = when {
             rawModule == null || rawModule == -1 -> null
             rawModule < -1 -> return null
+            rawModule == 0 -> 0
             version == 2 -> operator.modules.getOrNull(rawModule) ?: return null
             else -> rawModule
         }
@@ -341,7 +399,7 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator>) {
         val skillCount = when {
             operator.rarity <= 2 -> 0
             operator.rarity == 3 -> 1
-            operator.rarity == 6 || operator.name == "阿米娅" -> 3
+            operator.rarity == 6 || (operator.name == "阿米娅" && operator.role == "Caster") -> 3
             else -> 2
         }
         if (skill !in (if (skillCount == 0) 0..0 else 1..skillCount)) return null
@@ -355,7 +413,8 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator>) {
         val total = samples.sumOf { it.weight }
         return samples.groupBy { it.member.target.skill to it.member.target.module }.values.flatMap { group ->
             val branchWeight = group.sumOf { it.weight }
-            val targets = group.map { it.member.target }.distinct()
+            val requirements = group.groupingBy { it.member.target }.fold(0.0) { weight, sample -> weight + sample.weight }
+            val targets = requirements.keys.toList()
             val base = targets.first()
             val operator = group.first().member.operator
             val elites = (targets.map { it.elite } + levelCaps(operator.rarity).indices).distinct()
@@ -363,19 +422,27 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator>) {
                 targets.map { it.level } + 1 +
                     listOfNotNull(base.module?.takeIf { it > 0 }?.let { moduleUnlockLevel(operator.rarity) })
                 ).distinct()
-            val skills = targets.map { it.skillLevel }.distinct()
-            // Level resets on promotion; enumerate legal thresholds rather than reusing incomplete source pairs.
-            val candidates = elites.flatMap { elite ->
-                levels.flatMap { level ->
-                    skills.map { skill -> base.copy(elite = elite, level = level, skillLevel = skill) }
-                }
-            }.filter { isFeasible(it, operator) }
-            val covered = candidates.map { candidate ->
-                candidate to
-                    group.filter { covers(candidate, it.member.target) }.sumOf { it.weight } / branchWeight
+            val skills = targets.map { it.skillLevel }.distinct().sortedWith(nullsFirst())
+            val maxLevel = levelCaps(operator.rarity).max()
+            val coverageTable = if (targets.size * elites.size * levels.size * skills.size > 4 * (maxLevel + 1) * 11) {
+                CoverageTable(requirements, maxLevel)
+            } else {
+                null
             }
-            val qualifying = covered.filter { it.second + 1e-9 >= requested }
-            // ponytail: pairwise dominance within a discrete branch; prune a sorted frontier if catalog growth makes this costly.
+            // Level resets on promotion; enumerate legal thresholds rather than reusing incomplete source pairs.
+            val qualifying = elites.flatMap { elite ->
+                levels.mapNotNull { level ->
+                    // Higher skill thresholds at the same phase and level are always dominated by the first match.
+                    skills.firstNotNullOfOrNull { skill ->
+                        val target = base.copy(elite = elite, level = level, skillLevel = skill)
+                        if (!isFeasible(target, operator)) return@firstNotNullOfOrNull null
+                        val covered = coverageTable?.covered(target)
+                            ?: requirements.entries.sumOf { (requirement, weight) -> if (covers(target, requirement)) weight else 0.0 }
+                        val coverage = (covered / branchWeight).coerceIn(0.0, 1.0)
+                        (target to coverage).takeIf { coverage + 1e-9 >= requested }
+                    }
+                }
+            }
             val minimal = qualifying.filter { (candidate, _) ->
                 qualifying.none { (other, _) ->
                     other != candidate &&
@@ -383,17 +450,51 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator>) {
                         !covers(other, candidate)
                 }
             }
+            val levelDataRatio =
+                group.filter { it.member.target.elite != null && it.member.target.level != null }.sumOf { it.weight } / branchWeight
+            val skillDataRatio = group.filter { it.member.target.skillLevel != null }.sumOf { it.weight } / branchWeight
+            val moduleDataRatio = group.filter { it.member.target.module != null }.sumOf { it.weight } / branchWeight
             minimal.map { (target, coverage) ->
                 TrainingBranch(
                     target,
                     branchWeight / total,
                     coverage,
-                    group.filter { it.member.target.elite != null && it.member.target.level != null }.sumOf { it.weight } / branchWeight,
-                    group.filter { it.member.target.skillLevel != null }.sumOf { it.weight } / branchWeight,
-                    group.filter { it.member.target.module != null }.sumOf { it.weight } / branchWeight,
+                    levelDataRatio,
+                    skillDataRatio,
+                    moduleDataRatio,
                 )
             }
         }.sortedWith(compareByDescending<TrainingBranch> { it.usageShare }.thenBy { it.target.skill }.thenBy { it.target.module ?: -1 })
+    }
+
+    /** Prefix sums per promotion phase preserve unknown fields and the level reset on promotion. */
+    private class CoverageTable(requirements: Map<TrainingTarget, Double>, private val maxLevel: Int) {
+        private val sums = Array(4) { Array(maxLevel + 1) { DoubleArray(11) } }
+
+        init {
+            requirements.forEach { (target, weight) ->
+                sums[(target.elite ?: -1) + 1][target.level ?: 0][target.skillLevel ?: 0] += weight
+            }
+            sums.forEach { phase ->
+                for (level in 0..maxLevel) {
+                    for (skill in 0..10) {
+                        phase[level][skill] += (if (level > 0) phase[level - 1][skill] else 0.0) +
+                            (if (skill > 0) phase[level][skill - 1] else 0.0) -
+                            (if (level > 0 && skill > 0) phase[level - 1][skill - 1] else 0.0)
+                    }
+                }
+            }
+        }
+
+        fun covered(target: TrainingTarget): Double {
+            val level = target.level ?: 0
+            val skill = target.skillLevel ?: 0
+            var result = sums[0][level][skill]
+            target.elite?.let { elite ->
+                for (phase in 0..elite) result += sums[phase + 1][if (phase < elite) maxLevel else level][skill]
+            }
+            return result
+        }
     }
 
     private fun isFeasible(target: TrainingTarget, operator: RecommendationOperator): Boolean {
@@ -459,7 +560,7 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator>) {
         }
         private fun isPermanent(stage: ArkLevelEntity) =
             ArkLevelType.fromLevelId(stage.levelId) in setOf(ArkLevelType.MAINLINE, ArkLevelType.WEEKLY, ArkLevelType.CAMPAIGN)
-        private fun stageKey(document: Document) = "${document.stage.stageId}|${document.difficulty}"
+        private fun stageKey(document: Document) = document.stageKey
         private fun ageBucket(time: LocalDateTime, now: LocalDateTime) = when (ChronoUnit.DAYS.between(time, now)) {
             in Long.MIN_VALUE..7 -> 0
             in 8..30 -> 1
@@ -469,10 +570,28 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator>) {
         private fun JsonObject.string(key: String) = (get(key) as? JsonPrimitive)?.contentOrNull
         private fun JsonObject.number(key: String) = (get(key) as? JsonPrimitive)?.intOrNull
         private fun JsonObject.array(key: String) = get(key) as? JsonArray ?: JsonArray(emptyList())
-        private fun canonical(value: JsonElement): JsonElement = when (value) {
-            is JsonObject -> JsonObject(value.toSortedMap().mapValues { canonical(it.value) })
-            is JsonArray -> JsonArray(value.map { canonical(it) })
-            else -> value
+        private fun canonical(value: JsonElement): String = buildString { appendCanonical(value) }
+        private fun StringBuilder.appendCanonical(value: JsonElement) {
+            when (value) {
+                is JsonObject -> {
+                    append('{')
+                    value.keys.sorted().forEachIndexed { index, key ->
+                        if (index > 0) append(',')
+                        append(JsonPrimitive(key)).append(':')
+                        appendCanonical(value.getValue(key))
+                    }
+                    append('}')
+                }
+                is JsonArray -> {
+                    append('[')
+                    value.forEachIndexed { index, element ->
+                        if (index > 0) append(',')
+                        appendCanonical(element)
+                    }
+                    append(']')
+                }
+                else -> append(value)
+            }
         }
     }
 }

@@ -10,6 +10,7 @@ import plus.maa.backend.repository.entity.ArkLevelEntity
 import plus.maa.backend.repository.entity.CopilotEntity
 import plus.maa.backend.service.model.CopilotType
 import java.time.LocalDateTime
+import kotlin.random.Random
 
 class RecommendationEngineTest {
     private val now = LocalDateTime.of(2026, 7, 10, 12, 0)
@@ -288,6 +289,114 @@ class RecommendationEngineTest {
     }
 
     @Test
+    fun `weak recent feedback cannot bring an old strategy into a bounded history or permanent window`() {
+        val old = row(1, age = 1000, likes = 1, dislikes = 1).copy(latestPositiveAt = now.minusDays(1))
+        for (scope in listOf(RecommendationScope.PERMANENT, RecommendationScope.HISTORY)) {
+            val query = RecommendationQuery(scope = scope, days = 90, includeUncertain = true)
+            assertTrue(result(listOf(old), query).recommendations.isEmpty())
+        }
+        assertEquals(1, result(listOf(old), history).recommendations.size)
+    }
+
+    @Test
+    fun `legacy original module does not require an equipment catalog entry`() {
+        val robot = RecommendationOperator("robot", "小车", "Medic", 1)
+        val input = row(1).let {
+            it.copy(
+                entity = it.entity.copy(
+                    content = """{
+            "version":2,"stage_name":"s1","opers":[{"name":"小车","requirements":{"elite":0,"level":30,"module":0}}]
+        }""",
+                ),
+            )
+        }
+        val target = RecommendationEngine(listOf(robot)).calculate(listOf(input), levels, history, now)
+            .recommendations.single().branches.single().target
+        assertEquals(0, target.module)
+        assertEquals(30, target.level)
+    }
+
+    @Test
+    fun `Amiya third skill belongs only to the caster form`() {
+        for (role in listOf("Warrior", "Medic")) {
+            val amiya = RecommendationOperator("amiya_$role", "阿米娅", role, 5)
+            val input = row(1, name = amiya.name, skill = 3, module = 0)
+            assertTrue(RecommendationEngine(listOf(amiya)).calculate(listOf(input), levels, history, now).recommendations.isEmpty())
+        }
+    }
+
+    @Test
+    fun `cumulative coverage matches an exhaustive frontier with missing fields promotion resets and modules`() {
+        val random = Random(713)
+        fun covers(candidate: TrainingTarget, requirement: TrainingTarget): Boolean =
+            (requirement.elite == null || (candidate.elite != null && candidate.elite >= requirement.elite)) &&
+                (
+                    requirement.level == null ||
+                        (requirement.elite != null && candidate.elite != null && candidate.elite > requirement.elite) ||
+                        (candidate.level != null && candidate.level >= requirement.level)
+                    ) &&
+                (requirement.skillLevel == null || (candidate.skillLevel != null && candidate.skillLevel >= requirement.skillLevel))
+        repeat(60) { iteration ->
+            val module = if (iteration % 3 == 0) 1 else null
+            val targets = List(24) {
+                val elite = listOf(null, 0, 1, 2).random(random)
+                val cap = when (elite) {
+                    0 -> 50
+                    1 -> 80
+                    else -> 90
+                }
+                TrainingTarget(
+                    elite,
+                    if (random.nextBoolean()) null else random.nextInt(1, cap + 1),
+                    1,
+                    if (random.nextBoolean()) null else random.nextInt(1, 11),
+                    module,
+                )
+            }.distinct()
+            val rows = targets.mapIndexed { index, target ->
+                row(
+                    index.toLong() + 1,
+                    skill = 1,
+                    requirements = """{
+                    "elite":${target.elite},"level":${target.level},"skill_level":${target.skillLevel},"module":${target.module}
+                }""",
+                )
+            }
+            val requested = listOf(0.5, 0.6, 0.8, 1.0)[iteration % 4]
+            val candidates = (targets.map { it.elite } + listOf(0, 1, 2)).distinct().flatMap { elite ->
+                (targets.map { it.level } + 1 + if (module == 1) listOf(60) else emptyList()).distinct().flatMap { level ->
+                    targets.map { it.skillLevel }.distinct().map { skill -> TrainingTarget(elite, level, 1, skill, module) }
+                }
+            }.filter { target ->
+                val unlock = if (module == 1 || (target.skillLevel ?: 0) > 7) {
+                    2
+                } else if ((target.skillLevel ?: 0) > 4) {
+                    1
+                } else {
+                    0
+                }
+                val cap = when (target.elite) {
+                    0 -> 50
+                    1 -> 80
+                    else -> 90
+                }
+                (if (target.elite == null) unlock == 0 && target.level == null else target.elite >= unlock) &&
+                    (target.level == null || target.level <= cap) && (module != 1 || (target.level ?: 0) >= 60)
+            }
+            val qualifying = candidates.filter { target ->
+                targets.count { covers(target, it) }.toDouble() / targets.size + 1e-9 >=
+                    requested
+            }
+            val expected = qualifying.filter { target -> qualifying.none { it != target && covers(target, it) && !covers(it, target) } }
+            val branches = result(rows, history.copy(coverage = requested)).recommendations.single().branches
+            assertEquals(expected.toSet(), branches.map { it.target }.toSet(), "iteration $iteration")
+            branches.forEach { branch ->
+                assertEquals(targets.count { covers(branch.target, it) }.toDouble() / targets.size, branch.coverage, 1e-9)
+            }
+        }
+    }
+
+    @Test
     fun `joint coverage joins requirements instead of averaging incompatible training levels`() {
         val rows = listOf(row(1, level = 60, skillLevel = 10), row(2, level = 90, skillLevel = 7))
         val target = result(rows).recommendations.single().branches.single()
@@ -414,6 +523,35 @@ class RecommendationEngineTest {
         assertEquals(fixedScore / 2, recommendations.first().score, 1e-9)
         assertTrue(result(listOf(grouped), history.copy(includeAlternatives = false)).recommendations.isEmpty())
         assertTrue(recommendations.all { it.branches.single().target.level == null })
+    }
+
+    @Test
+    fun `duplicate group entries count once and alternate skills retain their training shares`() {
+        fun grouped(opers: String, secondGroup: String = "") = row(1).let {
+            it.copy(
+                entity = it.entity.copy(
+                    content = """{
+                "stage_name":"s1","groups":[{"name":"术师位","opers":[$opers]}$secondGroup]
+            }""",
+                ),
+            )
+        }
+        val first = """{"name":"测试干员","skill":1}"""
+        val second = """{"name":"测试干员","skill":2}"""
+        val fixedScore = result(listOf(row(1, skill = 1, requirements = "{}"))).recommendations.single().score
+        val duplicate = result(listOf(grouped("$first,$first"))).recommendations.single()
+        assertEquals(fixedScore, duplicate.score, 1e-9)
+        assertEquals(1, duplicate.branches.size)
+        val choice = result(listOf(grouped("$first,$second"))).recommendations.single()
+        assertEquals(fixedScore, choice.score, 1e-9)
+        assertEquals(listOf(1, 2), choice.branches.map { it.target.skill })
+        assertTrue(choice.branches.all { it.usageShare == 0.5 })
+        assertEquals(1, choice.familyCount)
+        val repeated = result(listOf(grouped("$first,$second", """,{"name":"重复位","opers":[$first,$second]}""")))
+            .recommendations.single()
+        assertEquals(fixedScore, repeated.score, 1e-9)
+        assertTrue(repeated.branches.all { it.usageShare == 0.5 })
+        assertTrue(result(listOf(grouped("$first,$second")), history.copy(includeAlternatives = false)).recommendations.isEmpty())
     }
 
     @Test

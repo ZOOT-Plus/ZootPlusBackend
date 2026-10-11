@@ -53,13 +53,28 @@ class CopilotRepository(private val jdbi: Jdbi) {
     fun findPublicRecommendationPage(afterId: Long, limit: Int): List<CopilotEntity> =
         jdbi.withHandle<List<CopilotEntity>, Exception> { handle ->
             handle.createQuery(
-                "SELECT * FROM copilot WHERE \"delete\" = FALSE AND status = 'PUBLIC' AND type = 'PRTS' AND copilot_id > :afterId ORDER BY copilot_id LIMIT :limit",
+                """
+                SELECT copilot_id, type, stage_name, title, content, first_upload_time, views, like_count, dislike_count
+                FROM copilot
+                WHERE "delete" = FALSE AND status = 'PUBLIC' AND type = 'PRTS' AND copilot_id > :afterId
+                ORDER BY copilot_id LIMIT :limit
+                """.trimIndent(),
             )
                 .bind("afterId", afterId)
                 .bind("limit", limit)
                 .mapTo(CopilotEntity::class.java)
                 .list()
         }
+
+    /** Feedback updates do not need the JSON document or an updateEntity dirty-check snapshot. */
+    fun findRecommendationFeedback(copilotId: Long): CopilotEntity? = jdbi.withHandle<CopilotEntity?, Exception> { handle ->
+        handle.createQuery(
+            """
+            SELECT copilot_id, type, stage_name, status, title, first_upload_time, views, like_count, dislike_count
+            FROM copilot WHERE "delete" = FALSE AND copilot_id = :id
+            """.trimIndent(),
+        ).bind("id", copilotId).mapTo(CopilotEntity::class.java).findOne().orElse(null)
+    }
 
     /** 未删除作业总数。 */
     fun countNotDeleted(): Long = jdbi.withHandle<Long, Exception> { h ->

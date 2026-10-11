@@ -83,7 +83,7 @@ data class OperatorRecommendation(
 @Serializable
 data class RecommendationResult(
     val generatedAt: String,
-    val algorithmVersion: Int = 1,
+    val algorithmVersion: Int = 2,
     val operationCount: Int,
     val familyCount: Int,
     val invalidCount: Int,
@@ -94,7 +94,7 @@ data class RecommendationResult(
 )
 
 @Serializable
-data class RecommendationStage(val id: String, val name: String)
+data class RecommendationStage(val id: String, val name: String, val category: String? = null, val activity: String? = null)
 
 internal data class RecommendationInput(
     val entity: CopilotEntity,

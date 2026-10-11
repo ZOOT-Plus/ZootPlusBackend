@@ -50,7 +50,7 @@ class OperatorRecommendationControllerTest {
     fun `query constructor defaults bind and response is serializable`() {
         mvc.perform(get("/copilot/recommendations"))
             .andExpect(status().isOk)
-            .andExpect(jsonPath("$.data.algorithm_version").value(1))
+            .andExpect(jsonPath("$.data.algorithm_version").value(2))
         verify { recommendations.recommend(RecommendationQuery()) }
         mvc.perform(get("/copilot/recommendations").param("scope", "HISTORY").param("days", "0").param("coverage", "0.9"))
             .andExpect(status().isOk)

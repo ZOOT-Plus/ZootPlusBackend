@@ -16,6 +16,7 @@ import plus.maa.backend.service.model.CopilotType
 import java.time.Duration
 import java.time.LocalDateTime
 import java.time.ZoneId
+import java.util.concurrent.Semaphore
 
 @Service
 class OperatorRecommendationService(
@@ -31,18 +32,33 @@ class OperatorRecommendationService(
     // Replacing the value preserves the entry's original expiry and isolates in-flight calculations.
     private class SnapshotEntry(var value: Snapshot)
     private val snapshots = Caffeine.newBuilder().maximumSize(1).expireAfterWrite(Duration.ofMinutes(15)).build<Int, SnapshotEntry>()
+    private val calculations = Semaphore(2, true)
 
     fun recommend(query: RecommendationQuery): RecommendationResult {
         val snapshot = synchronized(this) { snapshots.get(0) { SnapshotEntry(load()) }.value }
-        return snapshot.results.get(query) { snapshot.engine.calculate(snapshot.prepared, query, snapshot.time) }
+        val normalized = query.copy(
+            stageId = query.stageId?.trim()?.ifEmpty { null },
+            category = query.category?.trim()?.ifEmpty { null },
+            activity = query.activity?.trim()?.ifEmpty { null },
+            days = if (query.days == 0 && query.scope != RecommendationScope.HISTORY) 180 else query.days,
+        )
+        return snapshot.results.get(normalized) {
+            // A burst of different filters must not allocate one full-corpus calculation per request thread.
+            calculations.acquire()
+            try {
+                snapshot.engine.calculate(snapshot.prepared, normalized, snapshot.time)
+            } finally {
+                calculations.release()
+            }
+        }
     }
 
     @Synchronized
     fun refreshFeedback(copilotId: Long) {
         val entry = snapshots.getIfPresent(0) ?: return
         val snapshot = entry.value
-        if (copilotId !in snapshot.prepared.documentsById) return
-        val row = copilotRepository.findNotDeletedCopilotId(copilotId)
+        if (copilotId !in snapshot.prepared.familyIndexById) return
+        val row = copilotRepository.findRecommendationFeedback(copilotId)
         if (row == null || row.status != CopilotSetStatus.PUBLIC || row.type != CopilotType.PRTS) {
             invalidate()
             return
