@@ -175,9 +175,6 @@ tasks {
 
 tasks {
     test {
-        if (!System.getenv("RECOMMENDATION_REPLAY_DIR").isNullOrBlank()) {
-            maxHeapSize = "2g"
-        }
         useJUnitPlatform {
             // 标了 @Tag("integration") 的测试需要外部环境（真实 GitHub API、完整配置、网络），CI 无法提供，
             // 用 -PexcludeIntegration 排除；本地默认不排除，便于开发者按需自查。

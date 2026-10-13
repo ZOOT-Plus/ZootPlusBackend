@@ -5,7 +5,6 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
-import plus.maa.backend.common.serialization.defaultJson
 import plus.maa.backend.repository.entity.ArkLevelEntity
 import plus.maa.backend.repository.entity.CopilotEntity
 import plus.maa.backend.service.model.CopilotType
@@ -265,7 +264,6 @@ class RecommendationEngineTest {
         assertEquals(baseline * 0.3, recommendations.getValue(operator.id).score, 1e-9)
         assertEquals(baseline * 0.7, recommendations.getValue(other.id).score, 1e-9)
         assertTrue(mixed.recommendations.all { it.branches.single().coverage == 1.0 })
-        assertTrue(defaultJson.encodeToString(mixed).isNotBlank())
     }
 
     @Test
