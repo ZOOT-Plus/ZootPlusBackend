@@ -89,11 +89,20 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator>) {
     ): RecommendationResult = calculate(prepare(inputs, levels), query, now)
 
     fun prepare(inputs: List<RecommendationInput>, levels: List<ArkLevelEntity>): Prepared {
+        val catalog = levels.filter { !it.stageId.isNullOrBlank() }
         val levelIndex = buildMap {
-            levels.forEach { level ->
-                listOfNotNull(level.stageId, level.levelId, level.catThree).filter {
+            catalog.forEach { level ->
+                listOfNotNull(level.stageId, level.levelId).filter {
                     it.isNotBlank()
-                }.forEach { putIfAbsent(it.lowercase(), level) }
+                }.forEach { putIfAbsent(it.trim().lowercase(), level) }
+            }
+            catalog.flatMap { level ->
+                listOfNotNull(level.catThree, level.name).filter { it.isNotBlank() }.map { it.trim().lowercase() to level }
+            }.groupBy({ it.first }, { it.second }).forEach { (alias, matches) ->
+                // Bare names and codes prefer the normal variant, but must identify a single stage.
+                matches.sortedBy { it.stageId!!.length }.distinctBy {
+                    it.stageId!!.removeSuffix("#f#").replace("bossrush_tm", "bossrush_")
+                }.singleOrNull()?.let { putIfAbsent(alias, it) }
             }
         }
         var invalid = 0
@@ -291,9 +300,7 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator>) {
     private fun parse(input: RecommendationInput, levels: Map<String, ArkLevelEntity>, digest: MessageDigest): Document? {
         val root = runCatching { json.parseToJsonElement(input.entity.content) as? JsonObject }.getOrNull() ?: return null
         val stageName = root.string("stage_name") ?: input.entity.stageName
-        val stage =
-            levels[input.entity.stageName.lowercase()] ?: levels[stageName.lowercase()]
-                ?: ArkLevelEntity(stageId = stageName, catOne = "未知类型", catTwo = stageName)
+        val stage = levels[input.entity.stageName.trim().lowercase()] ?: levels[stageName.trim().lowercase()] ?: return null
         val slots = mutableListOf<List<Member>>()
         val aliases = mutableMapOf<String, String>()
         val fixed = root.array("opers").mapNotNull { parseMember(it as? JsonObject, root.number("version")) }

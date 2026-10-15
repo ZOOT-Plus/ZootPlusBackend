@@ -91,6 +91,60 @@ class RecommendationEngineTest {
     }
 
     @Test
+    fun `stage aliases resolve to one catalog stage and only catalog metadata becomes a filter`() {
+        val stage = levels.first().copy(name = "关卡名称")
+        val aliases = listOf(stage.stageId!!, stage.levelId!!, stage.catThree!!, stage.name!!, " S1 ")
+        val rows = aliases.mapIndexed { index, alias -> row(index.toLong(), stage = alias) } +
+            row(10).let { it.copy(entity = it.entity.copy(stageName = "过时的关卡名")) }
+        val result = engine.calculate(rows, listOf(levels[1].copy(name = "s1"), stage), history, now)
+        assertEquals(rows.size, result.operationCount)
+        assertEquals(1, result.familyCount)
+        assertEquals(0, result.invalidCount)
+        assertEquals(listOf("主题曲"), result.categories)
+        assertEquals(listOf("章节"), result.activities)
+        assertEquals(listOf(RecommendationStage("s1", "1-1 关卡名称", "主题曲", "章节")), result.stages)
+        assertEquals("s1", result.recommendations.single().sources.single().stageId)
+    }
+
+    @Test
+    fun `unmatched stages and catalog rows without stage ids cannot become recommendations or filters`() {
+        val rows = listOf(row(1), row(2, stage = "不存在的关卡"), row(3, stage = "空ID关卡"), row(4, stage = "空白ID关卡"))
+        val catalog = levels + listOf(
+            levels.first().copy(stageId = null, levelId = "main/missing", catThree = "空ID关卡", catTwo = "错误活动"),
+            levels.first().copy(stageId = " ", levelId = "main/blank", name = "空白ID关卡", catTwo = "错误活动"),
+        )
+        val result = engine.calculate(rows, catalog, history, now)
+        assertEquals(1, result.operationCount)
+        assertEquals(3, result.invalidCount)
+        assertEquals(listOf("章节"), result.activities)
+        assertEquals(listOf("s1"), result.stages.map { it.id })
+        assertEquals(result(listOf(row(1))).recommendations, result.recommendations)
+    }
+
+    @Test
+    fun `ambiguous aliases are rejected while explicit ids and difficulty variants stay distinct`() {
+        val stage = levels.first().copy(name = "重名关卡")
+        val hard = stage.copy(stageId = "s1#f#", levelId = "hard/s1")
+        val boss = stage.copy(stageId = "act1bossrush_01", levelId = "activities/boss", catThree = "B-1", name = "连战")
+        val bossHard = boss.copy(stageId = "act1bossrush_tm01", levelId = "activities/boss-hard")
+        val catalog = listOf(hard, stage, bossHard, boss, levels[1].copy(name = "重名关卡"))
+        val rows = listOf(
+            row(1, stage = "重名关卡"),
+            row(2, stage = "1-1"),
+            row(3, stage = "s1#f#"),
+            row(4, stage = "B-1"),
+            row(5, stage = "act1bossrush_tm01"),
+        )
+        val result = engine.calculate(rows, catalog, history, now)
+        assertEquals(1, result.invalidCount)
+        assertEquals(4, result.operationCount)
+        assertEquals(setOf("s1", "s1#f#", "act1bossrush_01", "act1bossrush_tm01"), result.stages.map { it.id }.toSet())
+        assertEquals(1, engine.calculate(rows, catalog, history.copy(stageId = "s1"), now).operationCount)
+        assertEquals(1, engine.calculate(rows, catalog, history.copy(stageId = "act1bossrush_01"), now).operationCount)
+        assertEquals(result, engine.calculate(rows, catalog.reversed(), history, now))
+    }
+
+    @Test
     fun `copies never multiply ratings views or independent support`() {
         val original = row(1)
         val one = result(listOf(original))
