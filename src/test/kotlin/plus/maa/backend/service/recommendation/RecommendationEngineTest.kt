@@ -36,12 +36,13 @@ class RecommendationEngineTest {
         actions: String = "[]",
         skill: Int = 3,
         requirements: String? = null,
+        difficulty: Int = 0,
     ): RecommendationInput {
         val requirementsJson = requirements ?: """{
             "elite":2,"level":$level,"skill_level":$skillLevel,"module":$module$extra
         }"""
         val content = """{
-            "stage_name":"$stage",
+            "stage_name":"$stage","difficulty":$difficulty,
             "opers":[{"name":"$name","skill":$skill,"requirements":$requirementsJson}],
             "actions":$actions,"doc":{"title":"作业$id"}
         }"""
@@ -387,6 +388,46 @@ class RecommendationEngineTest {
         assertEquals("CURRENT", result(listOf(row(1)), RecommendationQuery(stageId = "s1")).recommendations.single().status)
         val rows = listOf(row(1), row(2, stage = "s2"), row(3, stage = "s3"))
         assertEquals("CURRENT", result(rows, RecommendationQuery()).recommendations.single().status)
+    }
+
+    @Test
+    fun `difficulty flags on one catalog stage cannot satisfy general stage coverage`() {
+        val aliases = listOf("s1", "main/s1", "1-1")
+        val rows = listOf(0, 1, 3).mapIndexed { index, difficulty ->
+            row(
+                index + 1L,
+                stage = aliases[index],
+                difficulty = difficulty,
+                actions = """[{"type":"Deploy","name":"测试干员","location":[$index,0]}]""",
+            )
+        }
+        for (query in listOf(history, RecommendationQuery(includeUncertain = true))) {
+            val recommendation = result(rows, query).recommendations.single()
+            assertEquals(1, recommendation.stageCount)
+            assertEquals(1, recommendation.recentStageCount)
+            assertEquals(3, recommendation.familyCount)
+            assertEquals(3, recommendation.recentFamilyCount)
+            assertEquals(setOf("s1"), recommendation.sources.map { it.stageId }.toSet())
+            assertEquals("LIMITED", recommendation.status)
+        }
+        assertTrue(result(rows, RecommendationQuery()).recommendations.isEmpty())
+        for (query in listOf(RecommendationQuery(stageId = "s1"), RecommendationQuery(activity = "章节"))) {
+            assertEquals("CURRENT", result(rows, query).recommendations.single().status)
+        }
+    }
+
+    @Test
+    fun `distinct normal and challenge catalog stages retain coverage and difficulty grouping`() {
+        val stage = levels.first()
+        val catalog = listOf(stage, stage.copy(stageId = "s1#f#", levelId = "hard/s1"))
+        val rows = listOf(row(1, difficulty = 1), row(2, difficulty = 3), row(3, stage = "s1#f#", difficulty = 3))
+        val recommendation = engine.calculate(rows, catalog, RecommendationQuery(), now).recommendations.single()
+        assertEquals(2, recommendation.stageCount)
+        assertEquals(2, recommendation.recentStageCount)
+        assertEquals(3, recommendation.familyCount)
+        assertEquals(3, recommendation.recentFamilyCount)
+        assertEquals(setOf("s1", "s1#f#"), recommendation.sources.map { it.stageId }.toSet())
+        assertEquals("CURRENT", recommendation.status)
     }
 
     @Test
