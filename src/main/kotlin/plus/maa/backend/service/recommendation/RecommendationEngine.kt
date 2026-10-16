@@ -54,7 +54,6 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator>) {
     internal data class Prepared(
         val families: List<Family>,
         val familyIndexById: Map<Long, Int>,
-        val familyIndexesByStage: Map<String, List<Int>>,
         val invalidCount: Int,
         val categories: List<String>,
         val activities: List<String>,
@@ -127,15 +126,10 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator>) {
             familyIndexById = buildMap {
                 families.forEachIndexed { index, family -> family.documents.forEach { put(it.input.entity.copilotId, index) } }
             },
-            familyIndexesByStage = buildMap<String, MutableList<Int>> {
-                families.forEachIndexed { index, family ->
-                    val stage = family.documents.first().stage
-                    listOfNotNull(stage.stageId, stage.levelId).distinct().forEach { key -> getOrPut(key) { mutableListOf() }.add(index) }
-                }
-            },
             invalidCount = invalid,
             categories = documents.mapNotNull { it.stage.catOne }.filter { it.isNotBlank() }.distinct().sorted(),
-            activities = documents.mapNotNull { it.stage.catTwo }.filter { it.isNotBlank() }.distinct().sorted(),
+            activities = documents.mapNotNull { it.stage.catTwo }
+                .filter { it.isNotBlank() && !it.startsWith("level_", ignoreCase = true) }.distinct().sorted(),
             stages = documents.map {
                 RecommendationStage(
                     it.stage.stageId.orEmpty(),
@@ -150,10 +144,7 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator>) {
     fun calculate(prepared: Prepared, query: RecommendationQuery, now: LocalDateTime): RecommendationResult {
         val window = if (query.days == 0) 180 else query.days
         val cutoff = now.minusDays(window.toLong())
-        val candidates = query.stageId?.takeIf { it.isNotBlank() }?.let { id ->
-            prepared.familyIndexesByStage[id].orEmpty().map { prepared.families[it] }
-        } ?: prepared.families
-        val selected = candidates.filter { family ->
+        val available = prepared.families.filter { family ->
             val stage = family.documents.first().stage
             val permanent = family.documents.first().permanent
             val recent = family.firstPublishedAt >= cutoff || family.variants.any {
@@ -161,14 +152,26 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator>) {
                     wilson(it.input.entity.likeCount, it.input.entity.dislikeCount).first >= 0.5
             }
             (query.includeClosed || stage.isOpen != false || permanent) &&
-                (query.stageId.isNullOrBlank() || query.stageId == stage.stageId || query.stageId == stage.levelId) &&
-                (query.category.isNullOrBlank() || query.category == stage.catOne) &&
-                (query.activity.isNullOrBlank() || query.activity == stage.catTwo) &&
                 when (query.scope) {
                     RecommendationScope.RECENT -> recent || permanent
                     RecommendationScope.PERMANENT -> permanent && recent
                     RecommendationScope.HISTORY -> query.days == 0 || recent
                 }
+        }
+        val categoryFamilies = available.filter { query.category.isNullOrBlank() || query.category == it.documents.first().stage.catOne }
+        val activityFamilies = categoryFamilies.filter {
+            query.activity.isNullOrBlank() ||
+                query.activity == it.documents.first().stage.catTwo
+        }
+        val activityCounts = categoryFamilies.groupingBy { it.documents.first().stage.catTwo }.fold(0) { count, family ->
+            count + family.documents.size
+        }
+        val stageCounts = activityFamilies.groupingBy { it.documents.first().stage.stageId }.fold(0) { count, family ->
+            count + family.documents.size
+        }
+        val selected = activityFamilies.filter {
+            val stage = it.documents.first().stage
+            query.stageId.isNullOrBlank() || query.stageId == stage.stageId || query.stageId == stage.levelId
         }
         val stageFamilies = selected.groupingBy { stageKey(it.documents.first()) }.eachCount()
         val exposure = selected.flatMap { it.variants }.groupBy { "${stageKey(it)}|${ageBucket(it.input.entity.firstUploadTime, now)}" }
@@ -291,8 +294,8 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator>) {
             familyCount = selected.size,
             invalidCount = prepared.invalidCount,
             categories = prepared.categories,
-            activities = prepared.activities,
-            stages = prepared.stages,
+            activities = prepared.activities.filter { activityCounts.getOrDefault(it, 0) >= query.minOperationCount },
+            stages = prepared.stages.filter { stageCounts.getOrDefault(it.id, 0) >= query.minOperationCount },
             recommendations = recommendations,
         )
     }

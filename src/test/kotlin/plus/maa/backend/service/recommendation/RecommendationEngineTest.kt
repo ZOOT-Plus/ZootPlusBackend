@@ -19,7 +19,7 @@ class RecommendationEngineTest {
     private val levels = (1..4).map {
         ArkLevelEntity(stageId = "s$it", levelId = "main/s$it", catOne = "主题曲", catTwo = "章节", catThree = "1-$it")
     }
-    private val history = RecommendationQuery(days = 0, scope = RecommendationScope.HISTORY)
+    private val history = RecommendationQuery(days = 0, scope = RecommendationScope.HISTORY, minOperationCount = 1)
 
     private fun row(
         id: Long,
@@ -142,6 +142,67 @@ class RecommendationEngineTest {
         assertEquals(1, engine.calculate(rows, catalog, history.copy(stageId = "s1"), now).operationCount)
         assertEquals(1, engine.calculate(rows, catalog, history.copy(stageId = "act1bossrush_01"), now).operationCount)
         assertEquals(result, engine.calculate(rows, catalog.reversed(), history, now))
+    }
+
+    @Test
+    fun `filter thresholds count operations per activity and stage and omit internal activity codes`() {
+        val catalog = levels.mapIndexed { index, stage ->
+            stage.copy(
+                catTwo = listOf("活动甲", "活动乙", "活动乙", "level_crisis_v2_03-01")[index],
+            )
+        } + levels.first().copy(stageId = "s5", levelId = "rune/s5", catTwo = "level_rune_02-02")
+        val rows = listOf(5, 2, 3, 5, 5).flatMapIndexed { index, count ->
+            (1..count).map { row(index * 10L + it, stage = "s${index + 1}") }
+        } + row(100).let { it.copy(entity = it.entity.copy(content = "{")) }
+        val query = history.copy(minOperationCount = 5)
+        val result = engine.calculate(rows, catalog, query, now)
+        assertEquals(listOf("活动乙", "活动甲"), result.activities)
+        assertEquals(setOf("s1", "s4", "s5"), result.stages.map { it.id }.toSet())
+        assertEquals(20, result.operationCount)
+        assertEquals(1, result.invalidCount)
+        val relaxed = engine.calculate(rows, catalog, history, now)
+        assertEquals(result.activities, relaxed.activities)
+        assertEquals(catalog.map { it.stageId }.toSet(), relaxed.stages.map { it.id }.toSet())
+        assertEquals(result.recommendations, relaxed.recommendations)
+        val stricter = engine.calculate(rows, catalog, query.copy(minOperationCount = 6), now)
+        assertTrue(stricter.activities.isEmpty())
+        assertTrue(stricter.stages.isEmpty())
+        assertEquals(result.recommendations, stricter.recommendations)
+        val focused = engine.calculate(rows, catalog, query.copy(activity = "活动乙", stageId = "s2"), now)
+        assertEquals(result.activities, focused.activities)
+        assertTrue(focused.stages.isEmpty())
+        assertEquals(2, focused.operationCount)
+        assertEquals("s2", focused.recommendations.single().sources.single().stageId)
+        val category = engine.calculate(rows, catalog, query.copy(category = "危机合约"), now)
+        assertTrue(category.activities.isEmpty())
+        assertTrue(category.stages.isEmpty())
+    }
+
+    @Test
+    fun `filter options respect time windows open status scope and parent category`() {
+        val catalog = levels.map { it.copy(levelId = "activities/${it.stageId}", catOne = "活动关卡", catTwo = it.stageId) }
+            .map { if (it.stageId == "s2") it.copy(isOpen = false) else it } +
+            levels.first().copy(stageId = "main", catTwo = "主线章节")
+        val rows = listOf("s1" to 10L, "s2" to 10L, "s3" to 1000L, "main" to 1000L).flatMapIndexed { index, (stage, age) ->
+            (1..5).map { row(index * 10L + it, stage = stage, age = age) }
+        }
+        val query = RecommendationQuery(scope = RecommendationScope.HISTORY, days = 90)
+        val recent = engine.calculate(rows, catalog, query, now)
+        assertEquals(listOf("s1"), recent.activities)
+        assertEquals(listOf("s1"), recent.stages.map { it.id })
+        val closed = engine.calculate(rows, catalog, query.copy(includeClosed = true), now)
+        assertEquals(listOf("s1", "s2"), closed.activities)
+        assertEquals(setOf("s1", "s2"), closed.stages.map { it.id }.toSet())
+        val current = engine.calculate(rows, catalog, RecommendationQuery(), now)
+        assertEquals(setOf("s1", "main"), current.stages.map { it.id }.toSet())
+        val all = engine.calculate(rows, catalog, query.copy(days = 0, includeClosed = true), now)
+        assertEquals(setOf("s1", "s2", "s3", "main"), all.stages.map { it.id }.toSet())
+        val category = engine.calculate(rows, catalog, query.copy(days = 0, category = "主题曲"), now)
+        assertEquals(listOf("主线章节"), category.activities)
+        assertEquals(listOf("main"), category.stages.map { it.id })
+        val permanent = engine.calculate(rows, catalog, query.copy(scope = RecommendationScope.PERMANENT), now)
+        assertTrue(permanent.activities.isEmpty())
+        assertTrue(permanent.stages.isEmpty())
     }
 
     @Test

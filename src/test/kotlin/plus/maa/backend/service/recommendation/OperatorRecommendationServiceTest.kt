@@ -83,6 +83,21 @@ class OperatorRecommendationServiceTest {
     }
 
     @Test
+    fun `minimum operation counts cache separate options while reusing the source snapshot`() {
+        val service = service()
+        val standard = service.recommend(query)
+        val relaxedQuery = query.copy(minOperationCount = 1)
+        val relaxed = service.recommend(relaxedQuery)
+        assertTrue(standard.stages.isEmpty())
+        assertEquals(listOf("s1"), relaxed.stages.map { it.id })
+        assertEquals(standard.recommendations, relaxed.recommendations)
+        assertSame(standard, service.recommend(query))
+        assertSame(relaxed, service.recommend(relaxedQuery))
+        verify(exactly = 1) { row.content }
+        verify(exactly = 1) { levels.findAllOrdered() }
+    }
+
+    @Test
     fun `different uncached queries have bounded concurrency while cached reads remain available`() {
         val service = service()
         val cached = service.recommend(query)

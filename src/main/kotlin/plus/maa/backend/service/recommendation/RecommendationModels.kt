@@ -18,6 +18,7 @@ data class RecommendationQuery(
     @field:Size(max = 200) val stageId: String? = null,
     @field:Size(max = 200) val category: String? = null,
     @field:Size(max = 200) val activity: String? = null,
+    @field:Min(1) val minOperationCount: Int = 5,
     val includeClosed: Boolean = false,
     val includeAlternatives: Boolean = true,
     val includeUncertain: Boolean = false,

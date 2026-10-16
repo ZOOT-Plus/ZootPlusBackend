@@ -58,6 +58,21 @@ class OperatorRecommendationControllerTest {
     }
 
     @Test
+    fun `minimum operation count binds and invalid counts are rejected`() {
+        mvc.perform(get("/copilot/recommendations").param("minOperationCount", "10"))
+            .andExpect(status().isOk)
+        verify { recommendations.recommend(RecommendationQuery(minOperationCount = 10)) }
+        mvc.perform(get("/copilot/recommendations").param("minOperationCount", "1"))
+            .andExpect(status().isOk)
+        verify { recommendations.recommend(RecommendationQuery(minOperationCount = 1)) }
+        listOf("0", "-1", "1.5", "bad", "2147483648").forEach { count ->
+            mvc.perform(get("/copilot/recommendations").param("minOperationCount", count))
+                .andExpect(status().isBadRequest)
+        }
+        verify(exactly = 2) { recommendations.recommend(any()) }
+    }
+
+    @Test
     fun `invalid coverage and unbounded windows are rejected before calculation`() {
         mvc.perform(get("/copilot/recommendations").param("coverage", "0.1")).andExpect(status().isBadRequest)
         mvc.perform(get("/copilot/recommendations").param("days", "-1")).andExpect(status().isBadRequest)
