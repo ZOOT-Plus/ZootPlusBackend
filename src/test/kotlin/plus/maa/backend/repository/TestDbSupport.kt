@@ -41,11 +41,11 @@ abstract class TestDbSupport {
     }
 
     private companion object {
-        /** 全部 9 张业务表（与 V1__init.sql 一致），按外键依赖从后往前截断。 */
+        /** 全部业务表，按外键依赖从后往前截断。 */
         private val TRUNCATE_ALL_SQL =
             """
             TRUNCATE TABLE "user", user_follow, site_message, copilot, copilot_operator,
-                comments_area, rating, copilot_set, ark_level
+                comments_area, rating, copilot_set, ark_level, recommendation_snapshot
             RESTART IDENTITY CASCADE
             """.trimIndent()
 

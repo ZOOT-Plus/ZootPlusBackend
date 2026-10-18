@@ -42,7 +42,7 @@ class RecommendationRepositoryTest : TestDbSupport() {
     }
 
     @Test
-    fun `recommendation projections retain calculation fields without copying content for feedback`() {
+    fun `recommendation projections retain calculation fields without unrelated details`() {
         val repo = CopilotRepository(jdbi)
         val time = LocalDateTime.of(2026, 10, 1, 12, 0)
         val row = repo.insertEntity(
@@ -62,17 +62,9 @@ class RecommendationRepositoryTest : TestDbSupport() {
         assertEquals(row.title, projected.title)
         assertEquals(row.firstUploadTime, projected.firstUploadTime)
         assertEquals(row.views, projected.views)
-        val feedback = repo.findRecommendationFeedback(row.copilotId)!!
-        assertEquals(row.likeCount, feedback.likeCount)
-        assertEquals(row.dislikeCount, feedback.dislikeCount)
-        assertEquals(row.firstUploadTime, feedback.firstUploadTime)
-        assertEquals(row.stageName, feedback.stageName)
-        assertEquals("", feedback.content)
-        row.status = CopilotSetStatus.PRIVATE
-        repo.updateEntity(row)
-        assertEquals(CopilotSetStatus.PRIVATE, repo.findRecommendationFeedback(row.copilotId)!!.status)
-        row.delete = true
-        repo.updateEntity(row)
-        assertEquals(null, repo.findRecommendationFeedback(row.copilotId))
+        assertEquals(row.likeCount, projected.likeCount)
+        assertEquals(row.dislikeCount, projected.dislikeCount)
+        assertEquals(row.stageName, projected.stageName)
+        assertEquals(null, projected.details)
     }
 }

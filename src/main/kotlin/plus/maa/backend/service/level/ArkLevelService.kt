@@ -507,19 +507,12 @@ class ArkLevelService(
         block: (plus.maa.backend.repository.entity.ArkLevelEntity) -> Unit,
     ) {
         var pageable = Pageable.ofSize(batchSize)
-        var openStatusChanged = false
-        try {
-            do {
-                val page = withContext(Dispatchers.IO) { arkLevelRepo.findAllByCatOne(catOne.display, pageable) }
-                val previous = page.content.map { it.isOpen }
-                page.forEach(block)
-                withContext(Dispatchers.IO) { arkLevelRepo.saveAll(page.content) }
-                openStatusChanged = openStatusChanged || previous != page.content.map { it.isOpen }
-                pageable = page.nextPageable()
-            } while (page.hasNext())
-        } finally {
-            if (openStatusChanged) eventPublisher.publishEvent(ArkLevelOpenStatusChangedEvent)
-        }
+        do {
+            val page = withContext(Dispatchers.IO) { arkLevelRepo.findAllByCatOne(catOne.display, pageable) }
+            page.forEach(block)
+            withContext(Dispatchers.IO) { arkLevelRepo.saveAll(page.content) }
+            pageable = page.nextPageable()
+        } while (page.hasNext())
     }
 
     private suspend fun getGithubCommits() = withContext(Dispatchers.IO) { githubRepo.getCommits(github.token) }

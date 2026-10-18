@@ -1,8 +1,8 @@
 package plus.maa.backend.service.recommendation
 
+import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
-import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import plus.maa.backend.repository.entity.ArkLevelEntity
@@ -59,35 +59,30 @@ class RecommendationEngineTest {
     private fun result(rows: List<RecommendationInput>, query: RecommendationQuery = history) = engine.calculate(rows, levels, query, now)
 
     @Test
-    fun `prepared feedback refresh matches a full rebuild and leaves the previous snapshot intact`() {
-        val original = row(1, age = 400)
-        val copy = row(2, age = 380, likes = 10, dislikes = 1, views = 10_000)
-        val differentVariant = row(3, age = 390, level = 90)
-        val independent = row(4, stage = "s2")
-        val invalid = row(5).let { it.copy(entity = it.entity.copy(content = "{")) }
-        val rows = listOf(original, copy, differentVariant, independent, invalid)
+    fun `compact persisted evidence preserves calculations while dropping raw documents and duplicate copies`() {
+        val rows = (1L..100).map { id ->
+            row(id).let { input ->
+                input.copy(entity = input.entity.copy(content = input.entity.content.replace("作业$id", "作业$id" + "说明".repeat(2000))))
+            }
+        } + listOf(row(101, stage = "s2", level = 90), row(102).let { it.copy(entity = it.entity.copy(content = "{")) })
         val prepared = engine.prepare(rows, levels)
-        val queries = RecommendationScope.entries.flatMap { scope ->
-            listOf(0, 7, 180).flatMap { days ->
-                listOf(0.6, 0.8, 0.9).map { coverage ->
-                    RecommendationQuery(scope = scope, days = days, coverage = coverage)
+        val encoded = Json.encodeToString(prepared)
+        val restored = Json.decodeFromString<RecommendationEvidence>(encoded)
+        assertEquals(prepared, restored)
+        assertEquals(2, restored.families.size)
+        assertEquals(100, restored.families.first().operationCount)
+        assertEquals(1, restored.families.first().variants.size)
+        assertEquals(1, restored.operators.size)
+        assertEquals(2, restored.stages.size)
+        assertTrue(encoded.length < rows.sumOf { it.entity.content.length } / 20)
+        assertTrue(listOf("content", "skeleton", "fingerprint", "uploadTime", "uploaderId").none { encoded.contains("\"$it\"") })
+        RecommendationScope.entries.forEach { scope ->
+            listOf(0, 7, 180).forEach { days ->
+                listOf(0.6, 0.8, 0.9).forEach { coverage ->
+                    val query = history.copy(scope = scope, days = days, coverage = coverage)
+                    assertEquals(engine.calculate(prepared, query, now), RecommendationEngine().calculate(restored, query, now))
                 }
             }
-        } + listOf(history.copy(stageId = "s1"), RecommendationQuery(stageId = "s1"), history.copy(category = "主题曲"))
-        val initial = queries.map { engine.calculate(prepared, it, now) }
-        val feedback = copy.copy(entity = copy.entity.copy(likeCount = 200, views = 20_000), latestPositiveAt = now)
-        val refreshed = prepared.withFeedback(feedback)
-        assertEquals(2L, refreshed.families.first().variants.first().input.entity.copilotId)
-        assertSame(prepared.families.last(), refreshed.families.last())
-        queries.forEachIndexed { index, query ->
-            assertEquals(result(rows.map { if (it === copy) feedback else it }, query), engine.calculate(refreshed, query, now))
-            assertEquals(initial[index], engine.calculate(prepared, query, now))
-        }
-        val cancelled = feedback.copy(entity = feedback.entity.copy(likeCount = 0, dislikeCount = 0), latestPositiveAt = null)
-        val reverted = refreshed.withFeedback(cancelled)
-        assertEquals(1L, reverted.families.first().variants.first().input.entity.copilotId)
-        queries.forEach { query ->
-            assertEquals(result(rows.map { if (it === copy) cancelled else it }, query), engine.calculate(reverted, query, now))
         }
     }
 
@@ -105,6 +100,30 @@ class RecommendationEngineTest {
         assertEquals(listOf("章节"), result.activities)
         assertEquals(listOf(RecommendationStage("s1", "1-1 关卡名称", "主题曲", "章节")), result.stages)
         assertEquals("s1", result.recommendations.single().sources.single().stageId)
+    }
+
+    @Test
+    fun `stage dictionary preserves level aliases and metadata while counting shared stage ids once`() {
+        val main = levels.first()
+        val activity = main.copy(levelId = "activities/alias", catOne = "活动", catTwo = "活动名", isOpen = false)
+        val rows = listOf(
+            row(1, stage = main.levelId!!),
+            row(2, stage = activity.levelId!!, actions = """[{"type":"Skill","name":"测试干员"}]"""),
+        )
+        val prepared = engine.prepare(rows, listOf(main, activity))
+        val restored = Json.decodeFromString<RecommendationEvidence>(Json.encodeToString(prepared))
+        assertEquals(2, restored.stages.size)
+        val closed = engine.calculate(restored, history, now)
+        assertEquals(1, closed.operationCount)
+        assertEquals(listOf("主题曲", "活动"), closed.categories)
+        val included = engine.calculate(restored, history.copy(includeClosed = true), now)
+        assertEquals(2, included.operationCount)
+        assertEquals(1, included.recommendations.single().stageCount)
+        assertEquals(1, included.stages.size)
+        assertEquals(main.catOne, included.stages.single().category)
+        val focused = engine.calculate(restored, history.copy(stageId = activity.levelId, includeClosed = true), now)
+        assertEquals(1, focused.operationCount)
+        assertEquals(2L, focused.recommendations.single().sources.single().id)
     }
 
     @Test

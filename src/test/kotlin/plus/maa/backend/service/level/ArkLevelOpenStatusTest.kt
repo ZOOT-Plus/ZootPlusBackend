@@ -8,6 +8,7 @@ import io.mockk.verify
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.springframework.context.ApplicationEventPublisher
@@ -21,8 +22,10 @@ import plus.maa.backend.repository.entity.gamedata.ArkCharacter
 import plus.maa.backend.repository.ktorm.ArkLevelRepository
 import plus.maa.backend.repository.ktorm.CopilotRepository
 import plus.maa.backend.repository.ktorm.RatingRepository
+import plus.maa.backend.repository.ktorm.RecommendationSnapshotRepository
 import plus.maa.backend.service.recommendation.OperatorRecommendationService
 import plus.maa.backend.service.recommendation.RecommendationQuery
+import java.util.concurrent.TimeUnit.SECONDS
 import kotlin.test.assertFailsWith
 
 class ArkLevelOpenStatusTest : TestDbSupport() {
@@ -43,6 +46,7 @@ class ArkLevelOpenStatusTest : TestDbSupport() {
                 emptyMap(),
             )
         },
+        RecommendationSnapshotRepository(jdbi),
     )
 
     private fun service(repository: ArkLevelRepository = levels) = ArkLevelService(
@@ -56,11 +60,15 @@ class ArkLevelOpenStatusTest : TestDbSupport() {
         eventPublisher = publisher,
     )
 
-    @Test
-    fun `activity and crisis status changes invalidate cached recommendations`() = runTest {
-        every { publisher.publishEvent(ArkLevelOpenStatusChangedEvent) } answers {
-            recommendations.onOpenStatusChanged(ArkLevelOpenStatusChangedEvent)
+    private fun refreshRecommendations() {
+        jdbi.useHandle<Exception> {
+            it.execute("UPDATE recommendation_snapshot SET generated_at = generated_at - INTERVAL '1 day'")
         }
+        recommendations.rebuild().get(5, SECONDS)
+    }
+
+    @Test
+    fun `activity and crisis status changes wait for the daily snapshot refresh`() = runTest {
         val service = service()
         listOf(ArkLevelType.ACTIVITIES to "activities", ArkLevelType.RUNE to "rune").forEachIndexed { index, (type, path) ->
             val stageId = "s$index"
@@ -74,20 +82,26 @@ class ArkLevelOpenStatusTest : TestDbSupport() {
                     content = """{"stage_name":"$stageId","opers":[{"name":"能天使","skill":3}]}""",
                 ),
             )
+            refreshRecommendations()
             val query = RecommendationQuery(stageId = stageId)
-            assertTrue(recommendations.recommend(query).recommendations.isEmpty())
+            val closed = recommendations.recommend(query)
+            assertTrue(closed.recommendations.isEmpty())
             service.updateLevelsOfTypeInBatch(type) { it.isOpen = true }
-            assertEquals(1, recommendations.recommend(query).recommendations.size)
+            assertSame(closed, recommendations.recommend(query))
+            refreshRecommendations()
+            val open = recommendations.recommend(query)
+            assertEquals(1, open.recommendations.size)
             service.updateLevelsOfTypeInBatch(type) { it.isOpen = true }
             service.updateLevelsOfTypeInBatch(type) { it.isOpen = false }
+            assertSame(open, recommendations.recommend(query))
+            refreshRecommendations()
             assertTrue(recommendations.recommend(query).recommendations.isEmpty())
-            verify(exactly = (index + 1) * 2) { publisher.publishEvent(ArkLevelOpenStatusChangedEvent) }
         }
-        verify(exactly = 0) { publisher.publishEvent(ArkLevelsSyncedEvent) }
+        verify(exactly = 0) { publisher.publishEvent(any()) }
     }
 
     @Test
-    fun `completed pages still invalidate caches if a later page fails`() = runTest {
+    fun `completed pages remain persisted if a later page fails`() = runTest {
         val first = levels.insertEntity(ArkLevelEntity(catOne = ArkLevelType.ACTIVITIES.display, isOpen = false))
         val second = levels.insertEntity(ArkLevelEntity(catOne = ArkLevelType.ACTIVITIES.display, isOpen = false))
         val repository = spyk(levels)
@@ -100,6 +114,6 @@ class ArkLevelOpenStatusTest : TestDbSupport() {
         }
         assertTrue(levels.findById(first.id)!!.isOpen!!)
         assertFalse(levels.findById(second.id)!!.isOpen!!)
-        verify(exactly = 1) { publisher.publishEvent(ArkLevelOpenStatusChangedEvent) }
+        verify(exactly = 0) { publisher.publishEvent(any()) }
     }
 }

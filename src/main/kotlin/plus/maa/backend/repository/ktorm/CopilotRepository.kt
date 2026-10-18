@@ -66,16 +66,6 @@ class CopilotRepository(private val jdbi: Jdbi) {
                 .list()
         }
 
-    /** Feedback updates do not need the JSON document or an updateEntity dirty-check snapshot. */
-    fun findRecommendationFeedback(copilotId: Long): CopilotEntity? = jdbi.withHandle<CopilotEntity?, Exception> { handle ->
-        handle.createQuery(
-            """
-            SELECT copilot_id, type, stage_name, status, title, first_upload_time, views, like_count, dislike_count
-            FROM copilot WHERE "delete" = FALSE AND copilot_id = :id
-            """.trimIndent(),
-        ).bind("id", copilotId).mapTo(CopilotEntity::class.java).findOne().orElse(null)
-    }
-
     /** 未删除作业总数。 */
     fun countNotDeleted(): Long = jdbi.withHandle<Long, Exception> { h ->
         h.createQuery("SELECT COUNT(*) FROM copilot WHERE \"delete\" = FALSE")
