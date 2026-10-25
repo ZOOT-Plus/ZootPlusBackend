@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.springframework.test.util.ReflectionTestUtils
+import org.springframework.web.server.ResponseStatusException
 import plus.maa.backend.repository.entity.ArkLevelEntity
 import plus.maa.backend.repository.entity.CopilotEntity
 import plus.maa.backend.repository.entity.gamedata.ArkCharacter
@@ -50,7 +51,7 @@ class OperatorRecommendationServiceTest {
         dislikeCount = 10,
         content = """{"stage_name":"s1","opers":[{"name":"能天使","skill":3,"requirements":{"elite":2,"level":60,"skill_level":10}}]}""",
     )
-    private val catalog = listOf(ArkLevelEntity(stageId = "s1", levelId = "main/s1"))
+    private val catalog = listOf(ArkLevelEntity(stageId = "s1", levelId = "main/s1", catOne = "主题曲", catTwo = "第一章"))
     private val evidence = RecommendationEngine(listOf(operator)).prepare(listOf(RecommendationInput(row)), catalog)
     private val query = RecommendationQuery(stageId = "s1")
 
@@ -59,6 +60,7 @@ class OperatorRecommendationServiceTest {
     private fun persisted(at: LocalDateTime = time) {
         every { snapshots.generatedAt() } returns at
         every { snapshots.load(at) } returns evidence
+        every { snapshots.loadStages(any()) } returns evidence.stages
         every { snapshots.rebuildIfNeeded(any(), any()) } returns false
     }
 
@@ -79,6 +81,7 @@ class OperatorRecommendationServiceTest {
         val service = service()
         val first = service.recommend(query)
         assertSame(first, service.recommend(query.copy(stageId = " s1 ", category = "", activity = " ", days = 0)))
+        assertSame(first, service.recommend(query.copy(stageId = " MAIN/S1 ")))
         verify(exactly = 1) { snapshots.generatedAt() }
         verify(exactly = 1) { snapshots.load(time) }
         val different = service.recommend(query.copy(minOperationCount = 1))
@@ -87,10 +90,67 @@ class OperatorRecommendationServiceTest {
     }
 
     @Test
+    fun `shared stage ids preserve alias scope and the callers parent filters`() {
+        persisted()
+        val mixed = evidence.copy(
+            stages = evidence.stages + evidence.stages.single().copy(
+                levelId = "activities/s1",
+                category = "活动",
+                activity = "限时活动",
+                permanent = false,
+            ),
+            families = evidence.families + evidence.families.single().copy(stage = 1),
+        )
+        every { snapshots.loadStages(time) } returns mixed.stages
+        every { snapshots.load(time) } returns mixed
+        val service = service()
+        assertEquals(2, service.recommend(query).operationCount)
+        assertEquals(1, service.recommend(query.copy(stageId = "MAIN/S1")).operationCount)
+        val focused = service.recommend(query.copy(category = "活动", activity = "限时活动"))
+        assertEquals(1, focused.operationCount)
+        assertSame(focused, service.recommend(query.copy(category = " 活动 ", activity = " 限时活动 ")))
+    }
+
+    @Test
+    fun `invalid presets and incompatible filters cannot trigger a full evidence load`() {
+        persisted()
+        val service = service()
+        listOf(
+            query.copy(days = 91),
+            query.copy(coverage = 0.81),
+            query.copy(coverage = Double.NaN),
+            query.copy(minOperationCount = 6),
+            query.copy(category = "unknown"),
+            query.copy(activity = "unknown"),
+            query.copy(stageId = "unknown"),
+        ).forEach { invalid ->
+            assertThrows(ResponseStatusException::class.java) { service.recommend(invalid) }
+        }
+        verify(exactly = 0) { snapshots.load(any()) }
+    }
+
+    @Test
+    fun `permanent queries ignore irrelevant windows and closed status in cache keys`() {
+        persisted()
+        val service = service()
+        val first = service.recommend(query.copy(scope = RecommendationScope.PERMANENT))
+        assertSame(first, service.recommend(query.copy(scope = RecommendationScope.PERMANENT, days = 365, includeClosed = true)))
+        verify(exactly = 1) { snapshots.load(time) }
+    }
+
+    @Test
     fun `only 16 hot results are retained and inactive results expire`() {
         persisted()
         val service = service()
-        repeat(64) { service.recommend(query.copy(days = it + 100)) }
+        repeat(27) {
+            service.recommend(
+                query.copy(
+                    days = listOf(90, 180, 365)[it % 3],
+                    coverage = listOf(0.6, 0.8, 0.9)[it / 3 % 3],
+                    minOperationCount = listOf(1, 5, 10)[it / 9],
+                ),
+            )
+        }
         val cache = ReflectionTestUtils.getField(service, "results") as Cache<*, *>
         cache.cleanUp()
         assertTrue(cache.estimatedSize() <= 16)
@@ -117,7 +177,7 @@ class OperatorRecommendationServiceTest {
             try {
                 assertTrue(entered.await(5, SECONDS))
                 val identical = executor.submit<RecommendationResult> { service.recommend(query.copy(coverage = 0.6)) }
-                val third = executor.submit<RecommendationResult> { service.recommend(query.copy(coverage = 0.7)) }
+                val third = executor.submit<RecommendationResult> { service.recommend(query.copy(minOperationCount = 1)) }
                 assertThrows(TimeoutException::class.java) { third.get(100, MILLISECONDS) }
                 assertSame(cached, service.recommend(query))
                 release.countDown()
@@ -132,6 +192,7 @@ class OperatorRecommendationServiceTest {
     }
 
     private fun source() {
+        every { snapshots.loadStages(any()) } returns evidence.stages
         every { copilot.findPublicRecommendationPage(0, 1000) } returns listOf(row)
         every { copilot.findPublicRecommendationPage(1, 1000) } returns emptyList()
         every { ratings.latestPositiveCopilotTimes(any()) } returns emptyMap()
@@ -223,6 +284,20 @@ class OperatorRecommendationServiceTest {
         val versions = ReflectionTestUtils.getField(service, "versions") as Cache<*, *>
         versions.invalidateAll()
         assertEquals(1, service.recommend(query).recommendations.size)
+    }
+
+    @Test
+    fun `replacement before catalog lookup retries without loading mismatched evidence`() {
+        persisted()
+        val freshTime = time.plusSeconds(1)
+        every { snapshots.loadStages(time) } answers {
+            every { snapshots.generatedAt() } returns freshTime
+            null
+        }
+        every { snapshots.load(freshTime) } returns evidence
+        assertEquals(freshTime.toString(), service().recommend(query).generatedAt)
+        verify(exactly = 0) { snapshots.load(time) }
+        verify(exactly = 1) { snapshots.load(freshTime) }
     }
 
     @Test

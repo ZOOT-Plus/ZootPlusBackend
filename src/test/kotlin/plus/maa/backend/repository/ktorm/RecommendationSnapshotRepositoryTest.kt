@@ -48,6 +48,8 @@ class RecommendationSnapshotRepositoryTest : TestDbSupport() {
         assertEquals(time, restarted.generatedAt())
         val restored = restarted.load(time)!!
         assertEquals(evidence, restored)
+        assertEquals(evidence.stages, restarted.loadStages(time))
+        assertNull(restarted.loadStages(time.plusDays(1)))
         val query = RecommendationQuery(scope = RecommendationScope.HISTORY, days = 0)
         assertEquals(engine.calculate(evidence, query, time), RecommendationEngine().calculate(restored, query, time))
         assertFalse(repo.rebuildIfNeeded(time.plusHours(20)) { error("same day must not rebuild") })
@@ -65,6 +67,8 @@ class RecommendationSnapshotRepositoryTest : TestDbSupport() {
         assertTrue(repo.rebuildIfNeeded(time.plusDays(1)) { fresh })
         assertEquals(fresh, repo.load(time.plusDays(1)))
         assertNull(repo.load(time))
+        assertNull(repo.loadStages(time))
+        assertEquals(fresh.stages, repo.loadStages(time.plusDays(1)))
     }
 
     @Test
@@ -111,6 +115,7 @@ class RecommendationSnapshotRepositoryTest : TestDbSupport() {
         jdbi.useHandle<Exception> { it.execute("UPDATE recommendation_snapshot SET format_version = 0") }
         assertNull(repo.generatedAt())
         assertNull(repo.load(time))
+        assertNull(repo.loadStages(time))
         assertTrue(repo.rebuildIfNeeded(time.plusHours(1)) { evidence })
         assertEquals(evidence, repo.load(time.plusHours(1)))
     }

@@ -50,7 +50,7 @@ class OperatorRecommendationControllerTest {
     fun `query constructor defaults bind and response is serializable`() {
         mvc.perform(get("/copilot/recommendations"))
             .andExpect(status().isOk)
-            .andExpect(jsonPath("$.data.algorithm_version").value(2))
+            .andExpect(jsonPath("$.data.algorithm_version").value(3))
         verify { recommendations.recommend(RecommendationQuery()) }
         mvc.perform(get("/copilot/recommendations").param("scope", "HISTORY").param("days", "0").param("coverage", "0.9"))
             .andExpect(status().isOk)
@@ -65,7 +65,7 @@ class OperatorRecommendationControllerTest {
         mvc.perform(get("/copilot/recommendations").param("minOperationCount", "1"))
             .andExpect(status().isOk)
         verify { recommendations.recommend(RecommendationQuery(minOperationCount = 1)) }
-        listOf("0", "-1", "1.5", "bad", "2147483648").forEach { count ->
+        listOf("0", "-1", "2", "6", "11", "1.5", "bad", "2147483648").forEach { count ->
             mvc.perform(get("/copilot/recommendations").param("minOperationCount", count))
                 .andExpect(status().isBadRequest)
         }
@@ -73,10 +73,26 @@ class OperatorRecommendationControllerTest {
     }
 
     @Test
-    fun `invalid coverage and unbounded windows are rejected before calculation`() {
-        mvc.perform(get("/copilot/recommendations").param("coverage", "0.1")).andExpect(status().isBadRequest)
-        mvc.perform(get("/copilot/recommendations").param("days", "-1")).andExpect(status().isBadRequest)
+    fun `unsupported presets are rejected before calculation`() {
+        listOf("0.1", "0.7", "0.81", "NaN", "Infinity").forEach {
+            mvc.perform(get("/copilot/recommendations").param("coverage", it)).andExpect(status().isBadRequest)
+        }
+        listOf("-1", "1", "91", "366", "3650").forEach {
+            mvc.perform(get("/copilot/recommendations").param("days", it)).andExpect(status().isBadRequest)
+        }
         mvc.perform(get("/copilot/recommendations").param("scope", "bad")).andExpect(status().isBadRequest)
+        mvc.perform(get("/copilot/recommendations").param("stageId", "s".repeat(201))).andExpect(status().isBadRequest)
         verify(exactly = 0) { recommendations.recommend(any()) }
+    }
+
+    @Test
+    fun `daily presets and legacy default windows remain supported`() {
+        listOf("90", "180", "365", "0").forEach { days ->
+            listOf("0.6", "0.8", "0.9").forEach { coverage ->
+                mvc.perform(get("/copilot/recommendations").param("days", days).param("coverage", coverage))
+                    .andExpect(status().isOk)
+            }
+        }
+        verify(exactly = 12) { recommendations.recommend(any()) }
     }
 }

@@ -30,7 +30,13 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator> = empt
         val alternative: Boolean = false,
     )
     internal data class Document(
-        val input: RecommendationInput,
+        val id: Long,
+        val title: String,
+        val firstPublishedAt: LocalDateTime,
+        val latestPositiveAt: LocalDateTime?,
+        val views: Long,
+        val likes: Long,
+        val dislikes: Long,
         val stage: ArkLevelEntity,
         val difficulty: Int,
         val members: List<Member>,
@@ -41,13 +47,13 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator> = empt
         val permanent = isPermanent(stage)
     }
     internal data class Family(val documents: List<Document>) {
-        val firstPublishedAt: LocalDateTime = documents.minOf { it.input.entity.firstUploadTime }
+        val firstPublishedAt: LocalDateTime = documents.minOf { it.firstPublishedAt }
         val variants: List<Document> = documents.groupBy { it.variant }.values.map { copies ->
             // Copies are correlated evidence. Keep one evaluation, never add their votes or views.
             copies.minWith(
                 compareByDescending<Document> {
-                    it.input.entity.likeCount + it.input.entity.dislikeCount
-                }.thenBy { it.input.entity.copilotId },
+                    it.likes + it.dislikes
+                }.thenBy { it.id },
             )
         }
     }
@@ -69,7 +75,10 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator> = empt
         now: LocalDateTime,
     ): RecommendationResult = calculate(prepare(inputs, levels), query, now)
 
-    fun prepare(inputs: List<RecommendationInput>, levels: List<ArkLevelEntity>): RecommendationEvidence {
+    fun prepare(inputs: List<RecommendationInput>, levels: List<ArkLevelEntity>): RecommendationEvidence =
+        prepare(inputs.asSequence(), levels)
+
+    fun prepare(inputs: Sequence<RecommendationInput>, levels: List<ArkLevelEntity>): RecommendationEvidence {
         val catalog = levels.filter { !it.stageId.isNullOrBlank() }
         val levelIndex = buildMap {
             catalog.forEach { level ->
@@ -90,11 +99,11 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator> = empt
         val digest = MessageDigest.getInstance("SHA-256")
         val documents = inputs.filter { it.entity.type == CopilotType.PRTS }.mapNotNull { input ->
             parse(input, levelIndex, digest).also { if (it == null) invalid++ }
-        }
+        }.toList()
         // Anchor clusters avoid transitive chains merging substantially different strategies.
         val families = documents.groupBy { "${it.stageDifficultyKey}|${it.skeleton}" }.values.flatMap { bucket ->
             val clusters = mutableListOf<Pair<Set<String>, MutableList<Document>>>()
-            bucket.sortedBy { it.input.entity.firstUploadTime }.forEach { document ->
+            bucket.sortedBy { it.firstPublishedAt }.forEach { document ->
                 val identities = document.members.map { it.operator.id }.toSet()
                 val match = clusters.firstOrNull { (anchor, _) ->
                     2.0 * identities.count { it in anchor } / (identities.size + anchor.size).coerceAtLeast(1) >= 0.85
@@ -129,15 +138,14 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator> = empt
                     family.firstPublishedAt,
                     family.documents.size,
                     family.variants.map { document ->
-                        val row = document.input.entity
                         EvidenceVariant(
-                            row.copilotId,
-                            row.title,
-                            row.firstUploadTime,
-                            document.input.latestPositiveAt,
-                            row.views,
-                            row.likeCount,
-                            row.dislikeCount,
+                            document.id,
+                            document.title,
+                            document.firstPublishedAt,
+                            document.latestPositiveAt,
+                            document.views,
+                            document.likes,
+                            document.dislikes,
                             document.members.map { member ->
                                 EvidenceMember(
                                     operatorIndices.getValue(member.operator.id),
@@ -166,7 +174,7 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator> = empt
             (query.includeClosed || stage.isOpen != false || permanent) &&
                 when (query.scope) {
                     RecommendationScope.RECENT -> recent || permanent
-                    RecommendationScope.PERMANENT -> permanent && recent
+                    RecommendationScope.PERMANENT -> permanent
                     RecommendationScope.HISTORY -> query.days == 0 || recent
                 }
         }
@@ -410,7 +418,11 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator> = empt
         val variant = controls.toString() + unique.sortedBy { it.operator.id }
             .joinToString { "${it.operator.id}|${it.target}|${it.share}|${it.alternative}" } + executable.joinToString()
         fun fingerprint(value: String) = HexFormat.of().formatHex(digest.digest(value.toByteArray(Charsets.UTF_8)))
-        return Document(input, stage, root.number("difficulty") ?: 0, unique, fingerprint(skeleton), fingerprint(variant))
+        val row = input.entity
+        return Document(
+            row.copilotId, row.title, row.firstUploadTime, input.latestPositiveAt, row.views, row.likeCount, row.dislikeCount,
+            stage, root.number("difficulty") ?: 0, unique, fingerprint(skeleton), fingerprint(variant),
+        )
     }
 
     private fun parseMember(value: JsonObject?, version: Int?): Member? {

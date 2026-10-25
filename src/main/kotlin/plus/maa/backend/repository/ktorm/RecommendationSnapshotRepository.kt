@@ -4,6 +4,7 @@ import kotlinx.serialization.json.Json
 import org.jdbi.v3.core.Handle
 import org.jdbi.v3.core.Jdbi
 import org.springframework.stereotype.Repository
+import plus.maa.backend.service.recommendation.EvidenceStage
 import plus.maa.backend.service.recommendation.RecommendationEvidence
 import java.time.LocalDateTime
 import java.time.temporal.ChronoUnit
@@ -13,6 +14,15 @@ class RecommendationSnapshotRepository(private val jdbi: Jdbi) {
     private val json = Json { ignoreUnknownKeys = true }
 
     internal fun generatedAt(): LocalDateTime? = jdbi.withHandle<LocalDateTime?, Exception> { generatedAt(it) }
+
+    internal fun loadStages(generatedAt: LocalDateTime): List<EvidenceStage>? {
+        val encoded = jdbi.withHandle<String?, Exception> { handle ->
+            handle.createQuery(
+                "SELECT (evidence -> 'stages')::text FROM recommendation_snapshot WHERE id = 1 AND format_version = :version AND generated_at = :time",
+            ).bind("version", FORMAT_VERSION).bind("time", generatedAt).mapTo(String::class.java).findOne().orElse(null)
+        } ?: return null
+        return json.decodeFromString<List<EvidenceStage>>(encoded)
+    }
 
     internal fun load(generatedAt: LocalDateTime): RecommendationEvidence? {
         val encoded = jdbi.withHandle<String?, Exception> { handle ->

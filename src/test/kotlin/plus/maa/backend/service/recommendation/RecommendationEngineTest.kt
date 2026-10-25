@@ -87,6 +87,29 @@ class RecommendationEngineTest {
     }
 
     @Test
+    fun `streamed pages are parsed before advancing and source entities are not retained`() {
+        val first = row(1, age = 1000)
+        val copy = row(2, age = 10)
+        val expected = engine.prepare(listOf(first, copy), levels)
+        val streamed = sequence {
+            yield(first)
+            first.entity.content = "{"
+            first.entity.title = "changed after parsing"
+            first.entity.likeCount = 0
+            first.entity.firstUploadTime = now
+            yield(copy)
+            copy.entity.content = "{"
+            copy.entity.views = 0
+        }
+        val actual = engine.prepare(streamed, levels)
+        assertEquals(expected, actual)
+        assertEquals(1, actual.families.size)
+        assertEquals(2, actual.families.single().operationCount)
+        assertEquals(now.minusDays(1000), actual.families.single().firstPublishedAt)
+        assertEquals(1L, actual.families.single().variants.single().id)
+    }
+
+    @Test
     fun `stage aliases resolve to one catalog stage and only catalog metadata becomes a filter`() {
         val stage = levels.first().copy(name = "关卡名称")
         val aliases = listOf(stage.stageId!!, stage.levelId!!, stage.catThree!!, stage.name!!, " S1 ")
@@ -221,8 +244,8 @@ class RecommendationEngineTest {
         assertEquals(listOf("主线章节"), category.activities)
         assertEquals(listOf("main"), category.stages.map { it.id })
         val permanent = engine.calculate(rows, catalog, query.copy(scope = RecommendationScope.PERMANENT), now)
-        assertTrue(permanent.activities.isEmpty())
-        assertTrue(permanent.stages.isEmpty())
+        assertEquals(listOf("主线章节"), permanent.activities)
+        assertEquals(listOf("main"), permanent.stages.map { it.id })
     }
 
     @Test
@@ -462,12 +485,15 @@ class RecommendationEngineTest {
     }
 
     @Test
-    fun `weak recent feedback cannot bring an old strategy into a bounded history or permanent window`() {
+    fun `permanent catch up retains old evidence without treating weak feedback as recent support`() {
         val old = row(1, age = 1000, likes = 1, dislikes = 1).copy(latestPositiveAt = now.minusDays(1))
-        for (scope in listOf(RecommendationScope.PERMANENT, RecommendationScope.HISTORY)) {
-            val query = RecommendationQuery(scope = scope, days = 90, includeUncertain = true)
-            assertTrue(result(listOf(old), query).recommendations.isEmpty())
-        }
+        val recentHistory = RecommendationQuery(scope = RecommendationScope.HISTORY, days = 90, includeUncertain = true)
+        assertTrue(result(listOf(old), recentHistory).recommendations.isEmpty())
+        val permanent = result(listOf(old), recentHistory.copy(scope = RecommendationScope.PERMANENT)).recommendations.single()
+        assertEquals("INSUFFICIENT", permanent.status)
+        assertEquals(0, permanent.recentFamilyCount)
+        val reliable = result(listOf(row(2, age = 1000)), recentHistory.copy(scope = RecommendationScope.PERMANENT))
+        assertEquals("HISTORICAL", reliable.recommendations.single().status)
         assertEquals(1, result(listOf(old), history).recommendations.size)
     }
 
