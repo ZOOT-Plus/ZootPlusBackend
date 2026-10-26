@@ -58,14 +58,7 @@ class OperatorRecommendationService(
                     return@repeat
                 }
                 val normalized = normalize(query, stages)
-                val result = results.get(ResultKey(time, normalized)) {
-                    calculations.acquire()
-                    try {
-                        snapshots.load(time)?.let { RecommendationEngine().calculate(it, normalized, time) }
-                    } finally {
-                        calculations.release()
-                    }
-                }
+                val result = results.get(ResultKey(time, normalized)) { calculate(time, normalized) }
                 if (result != null) return result
             }
             // A daily replacement may occur between the lightweight version read and evidence load.
@@ -136,19 +129,56 @@ class OperatorRecommendationService(
 
     private fun now(): LocalDateTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai"))
 
+    private fun calculate(time: LocalDateTime, query: RecommendationQuery): RecommendationResult? {
+        calculations.acquire()
+        try {
+            val loadStartedAt = System.nanoTime()
+            val evidence = snapshots.load(time)
+            val loadedMs = (System.nanoTime() - loadStartedAt) / 1_000_000
+            if (evidence == null) return null
+            val calculateStartedAt = System.nanoTime()
+            val result = RecommendationEngine().calculate(evidence, query, time)
+            log.debug {
+                "推荐查询未命中缓存：加载证据 ${loadedMs}ms，计算 ${(System.nanoTime() - calculateStartedAt) / 1_000_000}ms，条件 $query"
+            }
+            return result
+        } finally {
+            calculations.release()
+        }
+    }
+
     private fun buildEvidence(): RecommendationEvidence {
-        val engine = RecommendationEngine(recommendationOperators(runBlocking { levelService.gameData() }))
+        val startedAt = System.nanoTime()
+        val operators = recommendationOperators(runBlocking { levelService.gameData() })
+        log.info { "推荐证据构建开始：干员目录 ${operators.size} 位" }
+        val engine = RecommendationEngine(operators)
+        var pageReadNs = 0L
+        var feedbackNs = 0L
         val rows = sequence {
             var afterId = 0L
+            var pages = 0
+            var seen = 0
             while (true) {
+                val pageStartedAt = System.nanoTime()
                 val page = copilotRepository.findPublicRecommendationPage(afterId, 1000)
+                pageReadNs += System.nanoTime() - pageStartedAt
                 if (page.isEmpty()) break
+                val feedbackStartedAt = System.nanoTime()
                 val feedback = ratingRepository.latestPositiveCopilotTimes(page.map { it.copilotId.toString() })
+                feedbackNs += System.nanoTime() - feedbackStartedAt
                 for (row in page) yield(RecommendationInput(row, feedback[row.copilotId.toString()]))
                 afterId = page.last().copilotId
+                pages++
+                seen += page.size
+                log.debug { "推荐证据读取第 $pages 页，累计 $seen 条，已耗时 ${(System.nanoTime() - startedAt) / 1_000_000}ms" }
             }
         }
-        return engine.prepare(rows, levelRepository.findAllOrdered())
+        val evidence = engine.prepare(rows, levelRepository.findAllOrdered())
+        log.info {
+            "推荐证据构建完成：总耗时 ${(System.nanoTime() - startedAt) / 1_000_000}ms；" +
+                "数据库读取 ${pageReadNs / 1_000_000}ms，正面评价查询 ${feedbackNs / 1_000_000}ms"
+        }
+        return evidence
     }
 }
 

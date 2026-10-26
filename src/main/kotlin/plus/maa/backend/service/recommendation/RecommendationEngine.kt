@@ -1,5 +1,6 @@
 package plus.maa.backend.service.recommendation
 
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -10,16 +11,17 @@ import kotlinx.serialization.json.intOrNull
 import plus.maa.backend.repository.entity.ArkLevelEntity
 import plus.maa.backend.service.level.ArkLevelType
 import plus.maa.backend.service.model.CopilotType
-import java.security.MessageDigest
 import java.time.LocalDateTime
 import java.time.temporal.ChronoUnit
-import java.util.HexFormat
+import java.util.zip.CRC32
+import java.util.zip.CRC32C
 import kotlin.math.ln
 import kotlin.math.pow
 import kotlin.math.sqrt
 
 /** Pure calculations: the clock, source rows and game catalog are explicit inputs. */
 internal class RecommendationEngine(catalog: List<RecommendationOperator> = emptyList()) {
+    private val log = KotlinLogging.logger { }
     private val operatorsByName = catalog.groupBy { it.name }
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -40,8 +42,8 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator> = empt
         val stage: ArkLevelEntity,
         val difficulty: Int,
         val members: List<Member>,
-        val skeleton: String,
-        val variant: String,
+        val skeleton: Fingerprint,
+        val variant: Fingerprint,
     ) {
         val stageDifficultyKey = "${stage.stageId}|$difficulty"
         val permanent = isPermanent(stage)
@@ -79,6 +81,7 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator> = empt
         prepare(inputs.asSequence(), levels)
 
     fun prepare(inputs: Sequence<RecommendationInput>, levels: List<ArkLevelEntity>): RecommendationEvidence {
+        val startedAt = System.nanoTime()
         val catalog = levels.filter { !it.stageId.isNullOrBlank() }
         val levelIndex = buildMap {
             catalog.forEach { level ->
@@ -96,12 +99,20 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator> = empt
             }
         }
         var invalid = 0
-        val digest = MessageDigest.getInstance("SHA-256")
+        val invalidSamples = mutableListOf<String>()
+        val parseStartedAt = System.nanoTime()
         val documents = inputs.filter { it.entity.type == CopilotType.PRTS }.mapNotNull { input ->
-            parse(input, levelIndex, digest).also { if (it == null) invalid++ }
+            parse(input, levelIndex).also {
+                if (it == null) {
+                    invalid++
+                    if (invalidSamples.size < 5) invalidSamples.add("${input.entity.copilotId}(${input.entity.stageName})")
+                }
+            }
         }.toList()
+        val parseMs = (System.nanoTime() - parseStartedAt) / 1_000_000
         // Anchor clusters avoid transitive chains merging substantially different strategies.
-        val families = documents.groupBy { "${it.stageDifficultyKey}|${it.skeleton}" }.values.flatMap { bucket ->
+        val clusterStartedAt = System.nanoTime()
+        val families = documents.groupBy { it.stageDifficultyKey to it.skeleton }.values.flatMap { bucket ->
             val clusters = mutableListOf<Pair<Set<String>, MutableList<Document>>>()
             bucket.sortedBy { it.firstPublishedAt }.forEach { document ->
                 val identities = document.members.map { it.operator.id }.toSet()
@@ -112,6 +123,7 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator> = empt
             }
             clusters.map { Family(it.second.toList()) }
         }
+        val clusterMs = (System.nanoTime() - clusterStartedAt) / 1_000_000
         val operators = documents.flatMap { it.members }.map { it.operator }.distinctBy { it.id }
         val operatorIndices = operators.mapIndexed { index, operator -> operator.id to index }.toMap()
         fun stage(document: Document): EvidenceStage = document.stage.let {
@@ -127,6 +139,12 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator> = empt
         }
         val stages = documents.map(::stage).distinct()
         val stageIndices = stages.mapIndexed { index, entry -> entry to index }.toMap()
+        log.info {
+            "推荐证据解析：作业 ${documents.size + invalid} 条，有效 ${documents.size} 份，无效 $invalid 条" +
+                (if (invalidSamples.isEmpty()) "" else "（样例 ${invalidSamples.joinToString()}）") +
+                "；解析 ${parseMs}ms，归并 ${clusterMs}ms，打法 ${families.size} 个，关卡 ${stages.size} 个，" +
+                "干员 ${operators.size} 位，总耗时 ${(System.nanoTime() - startedAt) / 1_000_000}ms"
+        }
         return RecommendationEvidence(
             operators,
             stages,
@@ -337,7 +355,7 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator> = empt
         )
     }
 
-    private fun parse(input: RecommendationInput, levels: Map<String, ArkLevelEntity>, digest: MessageDigest): Document? {
+    private fun parse(input: RecommendationInput, levels: Map<String, ArkLevelEntity>): Document? {
         val root = runCatching { json.parseToJsonElement(input.entity.content) as? JsonObject }.getOrNull() ?: return null
         val stageName = root.string("stage_name") ?: input.entity.stageName
         val stage = levels[input.entity.stageName.trim().lowercase()] ?: levels[stageName.trim().lowercase()] ?: return null
@@ -372,24 +390,25 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator> = empt
                 ),
             )
         }.filter { it.string("type") != "Output" }
-        val skeleton = if (actions.isEmpty()) {
-            "lineup:${members.map { it.operator.id }.distinct().sorted()}"
-        } else {
-            actions.joinToString(";") { action ->
-                val name = action.string("name")
-                val actor = name?.let { actors.getOrPut(aliases[it] ?: it) { actors.size } }
-                listOf(
-                    action.string("type") ?: "Deploy",
-                    actor,
-                    action["location"],
-                    action["direction"],
-                    action["rect"],
-                    action["begin"],
-                    action["end"],
-                    action["distance"],
-                ).joinToString(":")
+        val skeleton = FingerprintWriter().also { writer ->
+            if (actions.isEmpty()) {
+                writer.write("lineup")
+                members.map { it.operator.id }.distinct().sorted().forEach(writer::write)
+            } else {
+                actions.forEach { action ->
+                    val name = action.string("name")
+                    val actor = name?.let { actors.getOrPut(aliases[it] ?: it) { actors.size } }
+                    writer.write(action.string("type") ?: "Deploy")
+                    writer.write(actor)
+                    writer.write(action["location"])
+                    writer.write(action["direction"])
+                    writer.write(action["rect"])
+                    writer.write(action["begin"])
+                    writer.write(action["end"])
+                    writer.write(action["distance"])
+                }
             }
-        }
+        }.build()
         val unique = slots.flatMapIndexed { index, slot ->
             slot.map { index to it }
         }.groupBy { it.second.operator.id }.values.flatMap { entries ->
@@ -415,14 +434,41 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator> = empt
             action.string("name")?.let { fields["name"] = JsonPrimitive(aliases[it] ?: it) }
             canonical(JsonObject(fields))
         }
-        val variant = controls.toString() + unique.sortedBy { it.operator.id }
-            .joinToString { "${it.operator.id}|${it.target}|${it.share}|${it.alternative}" } + executable.joinToString()
-        fun fingerprint(value: String) = HexFormat.of().formatHex(digest.digest(value.toByteArray(Charsets.UTF_8)))
+        val variant = FingerprintWriter().also { writer ->
+            controls.forEach { writer.write(it) }
+            unique.sortedBy { it.operator.id }.forEach { member ->
+                writer.write(member.operator.id)
+                writer.write(member.target)
+                writer.write(member.share)
+                writer.write(member.alternative)
+            }
+            executable.forEach(writer::write)
+        }.build()
         val row = input.entity
         return Document(
             row.copilotId, row.title, row.firstUploadTime, input.latestPositiveAt, row.views, row.likeCount, row.dislikeCount,
-            stage, root.number("difficulty") ?: 0, unique, fingerprint(skeleton), fingerprint(variant),
+            stage, root.number("difficulty") ?: 0, unique, skeleton, variant,
         )
+    }
+
+    /** 两份 32 位校验和组成的 64 位指纹，比 SHA-256 快一个数量级。 */
+    internal data class Fingerprint(val first: Int, val second: Int)
+
+    /** 按字段直接写入，避免拼接大字符串。 */
+    private class FingerprintWriter {
+        private val first = CRC32C()
+        private val second = CRC32()
+
+        fun write(value: Any?) {
+            val bytes = (value?.toString() ?: "").toByteArray(Charsets.UTF_8)
+            first.update(bytes)
+            second.update(bytes)
+            // 字段分隔
+            first.update(31)
+            second.update(127)
+        }
+
+        fun build() = Fingerprint(first.value.toInt(), second.value.toInt())
     }
 
     private fun parseMember(value: JsonObject?, version: Int?): Member? {
@@ -604,6 +650,8 @@ internal class RecommendationEngine(catalog: List<RecommendationOperator> = empt
             val divisor = 1 + z2 / n
             return ((center - margin) / divisor).coerceIn(0.0, 1.0) to ((center + margin) / divisor).coerceIn(0.0, 1.0)
         }
+
+        /** 模组解锁：精英化二 + 4★40 / 5★50 / 6★60。 */
         private fun moduleUnlockLevel(rarity: Int) = when (rarity) {
             4 -> 40
             5 -> 50
