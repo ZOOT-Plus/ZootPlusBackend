@@ -186,6 +186,8 @@ tasks {
                 excludeTags("integration")
             }
         }
+        // 本地不排除 integration 时会加载 Spring 上下文与敏感词库，默认 512m 堆跑全量会 OOM。
+        maxHeapSize = "1500m"
     }
 }
 
