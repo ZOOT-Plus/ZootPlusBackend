@@ -105,6 +105,7 @@ class SecurityConfig(
                 "/arknights/level/v2",
                 "/arknights/level/v2/version",
                 "/copilot/query",
+                "/copilot/recommendations",
                 "/set/query",
                 "/set/get",
                 "/copilot/get/**",

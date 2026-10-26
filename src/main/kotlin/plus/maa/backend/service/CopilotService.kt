@@ -488,6 +488,7 @@ class CopilotService(
         // 获取作业
         val copilot = copilotRepository.findNotDeletedCopilotId(request.id)
         checkNotNull(copilot) { "作业不存在" }
+        if (likeCountChange == 0L && dislikeCountChange == 0L) return
 
         // 计算评分相关
         val likeCount = (copilot.likeCount + likeCountChange).coerceAtLeast(0)

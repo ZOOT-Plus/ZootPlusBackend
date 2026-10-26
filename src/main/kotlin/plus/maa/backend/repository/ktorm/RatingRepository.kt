@@ -46,6 +46,19 @@ class RatingRepository(
         return dao.countByTypeKeyInRatingAfter(type, keys, rating, startTime)
     }
 
+    /** Only a recent positive evaluation can renew evidence of use; this is not an execution log. */
+    fun latestPositiveCopilotTimes(keys: List<String>): Map<String, LocalDateTime> {
+        if (keys.isEmpty()) return emptyMap()
+        return jdbi.withHandle<Map<String, LocalDateTime>, Exception> { handle ->
+            handle.createQuery(
+                "SELECT key, MAX(rate_time) AS latest FROM rating WHERE type = 'COPILOT' AND rating = 'LIKE' AND key IN (<keys>) GROUP BY key",
+            )
+                .bindList("keys", keys)
+                .map { row, _ -> row.getString("key") to row.getTimestamp("latest").toLocalDateTime() }
+                .list().toMap()
+        }
+    }
+
     fun findById(id: Any): RatingEntity? = dao.findById(id as Long)?.attachSnapshot()
 
     fun deleteById(id: Any): Boolean = dao.deleteById(id as Long) > 0

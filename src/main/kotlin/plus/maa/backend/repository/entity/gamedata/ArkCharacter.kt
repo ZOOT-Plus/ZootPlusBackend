@@ -7,6 +7,7 @@ data class ArkCharacter(
     val name: String,
     val profession: String,
     val rarity: Int,
+    val subProfessionId: String? = null,
 ) {
     var id: String? = null
 }

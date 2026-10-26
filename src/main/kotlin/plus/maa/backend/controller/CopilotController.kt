@@ -29,6 +29,9 @@ import plus.maa.backend.controller.response.copilot.CopilotInfo
 import plus.maa.backend.controller.response.copilot.CopilotPageInfo
 import plus.maa.backend.service.CopilotService
 import plus.maa.backend.service.model.CommentStatus
+import plus.maa.backend.service.recommendation.OperatorRecommendationService
+import plus.maa.backend.service.recommendation.RecommendationQuery
+import plus.maa.backend.service.recommendation.RecommendationResult
 
 /**
  * @author LoMu
@@ -41,7 +44,15 @@ class CopilotController(
     private val copilotService: CopilotService,
     private val helper: AuthenticationHelper,
     private val response: HttpServletResponse,
+    private val recommendations: OperatorRecommendationService,
 ) {
+    @Operation(summary = "基于公开自动作业推荐干员养成")
+    @GetMapping("/recommendations")
+    fun recommendations(@ParameterObject @Valid query: RecommendationQuery): MaaResult<RecommendationResult> {
+        response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store")
+        return success(recommendations.recommend(query))
+    }
+
     @Operation(summary = "上传作业")
     @ApiResponse(description = "上传作业结果")
     @RequireJwt

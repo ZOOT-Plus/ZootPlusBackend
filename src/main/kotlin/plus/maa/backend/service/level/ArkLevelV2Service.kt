@@ -114,7 +114,7 @@ class ArkLevelV2Service(
          *
          * 因此新增 DTO 字段时必须同步加到这里，`digestCoversEveryFieldTheResponseCarries` 会在漏加时失败。
          *
-         * 不含 `isOpen`/`closeTime`：这两列是服务端内部状态（只有 `CopilotScoreRefreshTask` 使用），
+         * 不含 `isOpen`/`closeTime`：这两列是评分任务和推荐服务使用的服务端内部状态，
          * 不出现在任何响应变体里，改它们不改变响应体。
          *
          * 库里的 NULL 与空串按响应体的口径一并归一成空串（DTO 映射也是这么做的）：不归一化会让这类
