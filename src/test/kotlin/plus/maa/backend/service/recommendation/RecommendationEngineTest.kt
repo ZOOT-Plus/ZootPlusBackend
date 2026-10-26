@@ -110,6 +110,26 @@ class RecommendationEngineTest {
     }
 
     @Test
+    fun `closed-only category yields data when closed activities are included and nothing otherwise`() {
+        val closed = ArkLevelEntity(
+            stageId = "crisis",
+            levelId = "crisis/c1",
+            catOne = "危机合约",
+            catTwo = "测试",
+            catThree = "C-1",
+            isOpen = false,
+        )
+        val prepared = engine.prepare(listOf(row(1, stage = "crisis")), levels + closed)
+        assertEquals(listOf("危机合约"), prepared.stages.mapNotNull { it.category })
+        val closedQuery = history.copy(category = "危机合约")
+        assertTrue(engine.calculate(prepared, closedQuery, now).recommendations.isEmpty())
+        val opened = engine.calculate(prepared, closedQuery.copy(includeClosed = true), now)
+        assertEquals(1, opened.operationCount)
+        assertEquals(1, opened.recommendations.size)
+        assertEquals(listOf("危机合约"), opened.stages.mapNotNull { it.category })
+    }
+
+    @Test
     fun `stage aliases resolve to one catalog stage and only catalog metadata becomes a filter`() {
         val stage = levels.first().copy(name = "关卡名称")
         val aliases = listOf(stage.stageId!!, stage.levelId!!, stage.catThree!!, stage.name!!, " S1 ")
