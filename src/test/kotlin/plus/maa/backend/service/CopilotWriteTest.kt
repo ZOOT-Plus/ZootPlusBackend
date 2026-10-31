@@ -29,7 +29,7 @@ class CopilotWriteTest {
     private val service = CopilotService(
         repository, ratings, SerializationConfig().kotlinJson(), levels, mockk(relaxed = true), mockk(relaxed = true),
         mockk(relaxed = true), mockk(relaxed = true), mockk(), mockk(relaxed = true),
-        mockk(relaxed = true), mockk(relaxed = true),
+        mockk(relaxed = true),
     )
 
     init {

@@ -497,7 +497,7 @@ class UserRepository(
         return jdbi.withHandle<List<UserEntity>, Exception> { handle ->
             handle.createQuery(
                 """
-                SELECT * FROM "user" WHERE user_name LIKE :userName ESCAPE '\'
+                SELECT * FROM "user" WHERE user_name LIKE :userName ESCAPE '!'
                 ORDER BY fans_count DESC LIMIT :limit OFFSET :offset
                 """.trimIndent(),
             )
@@ -510,8 +510,9 @@ class UserRepository(
     }
 
     /**
-     * 转义 LIKE 模式串中的元字符（\、%、_），使搜索词按字面匹配。
-     * 配合 LIKE ... ESCAPE '\' 使用。
+     * 转义 LIKE 模式串中的元字符（!、%、_），使搜索词按字面匹配。
+     * 配合 LIKE ... ESCAPE '!' 使用：不用默认的反斜杠是因为 jdbi 的词法器把「反斜杠 + 引号」当作转义引号，
+     * 模式串之后一旦还有 `?` 占位符就会被吞掉（实测报 Superfluous positional param）。
      */
-    private fun escapeLike(s: String): String = s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    private fun escapeLike(s: String): String = s.replace("!", "!!").replace("%", "!%").replace("_", "!_")
 }

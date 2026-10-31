@@ -15,6 +15,8 @@
 
 1. 你需要一个有 Valkey (或Redis) 和 PostgreSQL 的环境，如果你是windows用户，可以从 [redis-windows](https://github.com/redis-windows/redis-windows/releases) 中下载Redis使用。 您也可以直接使用 [](./dev-docker/docker-compose.yml) 来启动 docker 服务
 2. 无需手动初始化数据库：应用首次启动时 Flyway 会根据 `src/main/resources/db/migration` 自动建表
+   - 作业搜索的全文检索依赖 PostgreSQL 的 zhparser 扩展（[dev-docker](./dev-docker/docker-compose.yml) 的镜像已内置）；
+     用官方 PostgreSQL 镜像时检索会自动降级为 `title`/`details` 的 LIKE 子串匹配，见 [docs/zhparser-migration.md 1.4](./docs/zhparser-migration.md)
 3. 使用你喜欢的 IDE 导入此项目，复制 [](/src/main/resources/application-template.yml) 到同目录下，命名为 `application-dev.yml`，修改数据库配置以符合你自己配置的环境。
 4. 下载安装 JDK 25 或者以上版本的 JDK， 可以考虑从 [zuluJDK](https://www.azul.com/downloads/?version=java-25-lts&package=jdk) 或者 [libreicaJDK](https://bell-sw.com/pages/downloads/#jdk-25-lts) 下载安装。 Jetbrains Idea 可以使用自带的 JDK 管理器进行下载
 5. 运行 `./gradlew bootRun`, windows 环境为 `./gradlew.bat bootRun`

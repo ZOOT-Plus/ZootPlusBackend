@@ -21,23 +21,6 @@ import java.time.LocalDateTime
 private const val COPILOT_SNAPSHOT_MAX_SIZE = 20_000L
 private val COPILOT_SNAPSHOT_TTL: Duration = Duration.ofDays(14)
 
-/** zhparser 文本搜索配置名，沿用 abcfy2/zhparser 镜像自带的 chinese_zh。 */
-private const val CHINESE_ZH_FTS_CONFIG = "chinese_zh"
-
-/**
- * 关卡号归一化：给每段 ASCII 字母数字两侧补空格，使它无论前后是中文、括号还是连字符，
- * 都切成同一个词元（`regexp_replace` 是 IMMUTABLE，可用于表达式索引）。
- *
- * SCWS 的切词随上下文漂移：裸 `H17` → `h17`，而 `[H17-4]` → `h` + `17` + `4`，两者永不相等，
- * 于是「搜 H17」匹配不到标题 `[H17-4]`；`S3磨难` 里紧邻中文的 ASCII 段甚至会被整段丢弃。
- * 文档表达式与查询关键字必须使用同一归一化，否则同一串文本在两侧会切成不同词元。
- */
-private const val ASCII_RUN_PAD = "'([A-Za-z0-9]+)', ' \\1 ', 'g'"
-
-/** 作业标题/描述的 zhparser tsvector 表达式，查询条件必须与索引表达式完全一致。 */
-private const val COPILOT_DOCUMENT_TSV_EXPR =
-    "to_tsvector('$CHINESE_ZH_FTS_CONFIG', regexp_replace(coalesce(title, '') || ' ' || coalesce(details, ''), $ASCII_RUN_PAD))"
-
 /**
  * 模块「copilot」的 Jdbi repository。
  *
@@ -50,6 +33,18 @@ private const val COPILOT_DOCUMENT_TSV_EXPR =
 class CopilotRepository(private val jdbi: Jdbi) {
 
     private val dao: CopilotDao = jdbi.onDemand(CopilotDao::class.java)
+
+    /**
+     * 文档检索是否可用：探测一次 [CopilotDocumentSearch.CONFIG] 是否存在，结果在实例内缓存。
+     * 无 zhparser 的环境（官方 PG 镜像、本地开发、V4 迁移被跳过的库）降级为 LIKE 子串匹配，
+     * 而不是让检索直接报 `text search configuration "chinese_zh" does not exist`。
+     * 之后补建了 zhparser 需重启才能切回 FTS。
+     */
+    private val documentSearchAvailable: Boolean by lazy {
+        jdbi.withHandle<Boolean, Exception> { h ->
+            h.createQuery(CopilotDocumentSearch.AVAILABLE_SQL).mapTo(Boolean::class.java).one()
+        }
+    }
 
     /** updateEntity 脏检查快照；缓存未命中时退化为全列 UPDATE。 */
     private val snapshots: Cache<Long, CopilotEntity> = Caffeine.newBuilder()
@@ -283,11 +278,13 @@ class CopilotRepository(private val jdbi: Jdbi) {
         req.status?.let { add("status = ?", it.name) }
         req.stageNameKeyword?.let { add("stage_name LIKE ?", it) }
         req.stageNames?.let { addIn("stage_name", it) }
-        // 用 plainto_tsquery 而不是 websearch_to_tsquery：无空格中文会被 zhparser 切成多个词，
-        // websearch 会把它们拼成 <-> 短语（「阿米娅挂机」匹配不到「阿米娅精二挂机」），
-        // 并会把 or/-/引号解释成运算符；plainto 把分词结果按 AND 组合，词出现在任意位置即命中。
-        req.documentKeyword?.takeIf { it.isNotBlank() }?.let {
-            add("$COPILOT_DOCUMENT_TSV_EXPR @@ plainto_tsquery('$CHINESE_ZH_FTS_CONFIG', regexp_replace(?, $ASCII_RUN_PAD))", it)
+        req.documentKeyword?.takeIf { it.isNotBlank() }?.let { keyword ->
+            if (documentSearchAvailable) {
+                add(CopilotDocumentSearch.QUERY_CONDITION, keyword)
+            } else {
+                val pattern = CopilotDocumentSearch.likePattern(keyword)
+                add(CopilotDocumentSearch.FALLBACK_CONDITION, pattern, pattern)
+            }
         }
         req.inUserIds?.let { addIn("uploader_id", it) }
         req.inCopilotIds?.let { addIn("copilot_id", it) }
@@ -401,7 +398,10 @@ data class CopilotQueryRequest(
     /** 原样绑定（不带 % 通配符，基线 like 语义） */
     val stageNameKeyword: String? = null,
     val stageNames: List<String>? = null,
-    /** 非空白时对 title/details 做 zhparser 全文检索（分词结果按 AND 组合，不解释运算符）。 */
+    /**
+     * 非空白时对 title/details 做 zhparser 全文检索（分词结果按 AND 组合，不解释运算符）；
+     * 库里没有 chinese_zh 配置（无 zhparser 的环境）时降级为 LIKE 子串匹配。
+     */
     val documentKeyword: String? = null,
     val inUserIds: List<Long>? = null,
     val inCopilotIds: List<Long>? = null,

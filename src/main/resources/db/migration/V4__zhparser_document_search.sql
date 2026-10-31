@@ -3,9 +3,11 @@
 -- 2. 扩展不存在（如官方 postgres 镜像、embedded PG 测试环境）时整段跳过，不影响其他迁移；
 -- 3. 应用连接的数据库账号若无 CREATE EXTENSION 权限，这里会显式失败，避免带病启动。
 --
--- 2026-10 未发布前的文件合并：原 V4__zhparser_level_code_tokenization.sql（关卡号归一化索引）
--- 已并入本文件末尾。已应用过拆分前 V3/V4 的本地库需删除 flyway_schema_history 里 version 3/4
--- 两行让 V3 重新应用（幂等），详见 docs/zhparser-migration.md 第 4 节。
+-- 版本号：本文件曾编为 V3，与 dev 已发布的 V3__add_recommendation_snapshot.sql 版本号冲突
+-- （Flyway 对同版本号直接拒绝启动），故改为 V4；原本单独的 V4__zhparser_level_code_tokenization.sql
+-- （关卡号归一化索引，未发布）已并入本文件末尾。
+-- 本地库若应用过拆分前的 zhparser 迁移，需先按 script 名删掉 flyway_schema_history 里对应行，
+-- 下次启动时 Flyway 会补应用 V4（幂等，含删旧索引重建），详见 docs/zhparser-migration.md 第 4 节。
 
 DO $$
 BEGIN
@@ -30,7 +32,7 @@ BEGIN
             SELECT 1
             FROM pg_ts_config
             WHERE cfgname = 'chinese_zh'
-              AND cfgnamespace = 'public'::regnamespace
+              AND cfgnamespace = current_schema()::regnamespace
         ) THEN
             CREATE TEXT SEARCH CONFIGURATION chinese_zh (PARSER = zhparser);
         END IF;
@@ -45,10 +47,10 @@ END
 $$;
 
 -- 对 title/details 的 zhparser 表达式建 GIN 索引，表达式含「ASCII 段补空格」归一化。
--- 查询条件必须与这里的表达式完全一致（见 CopilotRepository.COPILOT_DOCUMENT_TSV_EXPR）。
+-- 查询条件必须与这里的表达式完全一致（见 CopilotDocumentSearch.DOCUMENT_TSV）。
 --
 -- 归一化：给每段 ASCII 字母数字两侧补空格，让 `H17` / `S3` / `IW-EX-1` 这类关卡号无论前后
--- 是中文、括号还是连字符都切成同一个词元（见 CopilotRepository.ASCII_RUN_PAD）。
+-- 是中文、括号还是连字符都切成同一个词元（见 CopilotDocumentSearch.ASCII_RUN_PAD）。
 -- 起因：SCWS 的切词随上下文漂移——裸 'H17' 切成 'h17'，而 '[H17-4]' 切成 'h' + '17' + '4'，
 -- 两者永不相等，于是「搜 H17」匹配不到标题 '[H17-4]'；'S3磨难' 里紧邻中文的 ASCII 段
 -- 甚至会被整段丢弃。
@@ -67,7 +69,7 @@ BEGIN
         SELECT 1
         FROM pg_ts_config
         WHERE cfgname = 'chinese_zh'
-          AND cfgnamespace = 'public'::regnamespace
+          AND cfgnamespace = current_schema()::regnamespace
     ) THEN
         IF EXISTS (
             SELECT 1

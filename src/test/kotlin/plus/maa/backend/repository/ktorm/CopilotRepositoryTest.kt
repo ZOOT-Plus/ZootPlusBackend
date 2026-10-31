@@ -45,7 +45,8 @@ import java.time.LocalDateTime
  * 4. query 的 hasNext 两分支语义不同：聚合分支 `count > page*limit`，非聚合分支 `r.size >= limit`；
  * 5. `documentKeyword` 走 FTS：`plainto_tsquery` 分词后按 AND 组合（词在任意位置即命中），
  *    输入中的 `or` / `-` / 引号不被解释为运算符；embedded PG 无 zhparser，
- *    测试基类用 `COPY = pg_catalog.simple` 建了同名替身配置，故中文分词质量不在覆盖范围内。
+ *    测试基类用 `COPY = pg_catalog.simple` 建了同名替身配置，故中文分词质量不在覆盖范围内；
+ *    没有该配置时降级为 title/details 的 LIKE 子串匹配（有一条测试临时删掉替身来验证）。
  */
 class CopilotRepositoryTest : TestDbSupport() {
 
@@ -776,6 +777,70 @@ class CopilotRepositoryTest : TestDbSupport() {
         val (page, total) = queryCopilots(documentKeyword = "alpha gamma", page = 2, limit = 1)
         assertEquals(2L, total)
         assertEquals(listOf(a), page.map { it.copilotId })
+    }
+
+    /**
+     * 判别力：把 V4 迁移里的索引表达式改回不带归一化的 `to_tsvector('chinese_zh', ...)`，
+     * 或者改 `CopilotDocumentSearch.DOCUMENT_TSV` 的列拼接，断言即失败。
+     * 两者漂移本身不会抛错，只会让规划器放弃 `idx_copilot_document_tsv` → 全表扫描。
+     */
+    @Test
+    fun `gin index expression in the zhparser migration matches the query expression`() {
+        val sql = requireNotNull(javaClass.classLoader.getResourceAsStream("db/migration/V4__zhparser_document_search.sql")) {
+            "迁移文件 db/migration/V4__zhparser_document_search.sql 不在 classpath 上"
+        }.use { it.readBytes().toString(Charsets.UTF_8) }
+
+        assertTrue(sql.contains("idx_copilot_document_tsv"), "索引名变了，本测试与迁移的约定也要跟着改")
+        assertTrue(
+            normalizeSql(sql).contains(normalizeSql(CopilotDocumentSearch.DOCUMENT_TSV)),
+            "索引表达式与 CopilotDocumentSearch.DOCUMENT_TSV 不一致，查询将用不上 GIN 索引",
+        )
+    }
+
+    /** 压掉缩进/换行差异后比较；字面量内的空格都是单个的，不会被改到。 */
+    private fun normalizeSql(text: String): String = text.replace(Regex("\\s+"), " ")
+        .replace(", ", ",")
+        .replace("( ", "(")
+        .replace(" )", ")")
+
+    /**
+     * 降级口径：库里没有 chinese_zh（官方 PG 镜像、本地开发环境）时，文档检索退化为 LIKE 子串匹配，
+     * 而不是抛 `text search configuration "chinese_zh" does not exist`。
+     *
+     * 判别力：去掉可用性探测、让 FTS 条件无条件拼进 SQL，第一条断言即抛上述异常；
+     * 不转义 LIKE 元字符时 `%` 那条会命中全部行。
+     */
+    @Test
+    fun `document search falls back to like substring when chinese_zh is missing`() {
+        val a = repo.insertEntity(newCopilot(title = "Alpha Beta Gamma")).copilotId
+        val b = repo.insertEntity(newCopilot(title = "delta", details = "alpha gamma")).copilotId
+        val c = repo.insertEntity(newCopilot(title = "100% solid")).copilotId
+
+        jdbi.useHandle<Exception> { it.execute("DROP TEXT SEARCH CONFIGURATION chinese_zh") }
+        try {
+            // 新实例才会重新探测（探测结果在实例内缓存）
+            val fallback = CopilotRepository(jdbi)
+
+            // 子串且大小写不敏感：可跨词命中，FTS 的 AND 口径下这里同样是命中，但靠的是子串
+            assertEquals(
+                listOf(a),
+                fallback.queryCopilots(CopilotQueryRequest(documentKeyword = "lpha Bet")).first.map { it.copilotId },
+            )
+            // 子串语义：'alpha gamma' 只连续出现在 b 的 details 里（FTS 口径会同时命中 a）
+            assertEquals(
+                listOf(b),
+                fallback.queryCopilots(CopilotQueryRequest(documentKeyword = "alpha gamma")).first.map { it.copilotId },
+            )
+            // % 按字面匹配而非通配符
+            assertEquals(
+                listOf(c),
+                fallback.queryCopilots(CopilotQueryRequest(documentKeyword = "%")).first.map { it.copilotId },
+            )
+        } finally {
+            jdbi.useHandle<Exception> {
+                it.execute("CREATE TEXT SEARCH CONFIGURATION chinese_zh (COPY = pg_catalog.simple)")
+            }
+        }
     }
 
     @Test

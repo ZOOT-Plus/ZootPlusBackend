@@ -8,7 +8,7 @@
 
 - PG 镜像：`abcfy2/zhparser:18-alpine`
 - PG 数据目录：`/var/lib/postgresql/18/docker`
-- 文本搜索配置：`chinese_zh`（parser = zhparser，复用镜像默认配置，不存在时由 V3 创建）
+- 文本搜索配置：`chinese_zh`（parser = zhparser，复用镜像默认配置，不存在时由 V4 创建）
 - 领域词典：`arknights.txt`，每个词统一标记为名词 `n`
 - 检索口径：`zhparser.multi_duality=on`（长词子串召回，见 1.2）
 - 单字检索：`zhparser.multi_zmain=on`（单字召回与 LIKE 子串一致，见 1.3）
@@ -18,12 +18,29 @@
 - **收录范围**：只收能提升 `copilot.title` / `copilot.details` 检索的词汇 —— ① 干员名、干员绰号 ② 关卡名（含活动关、集成战略关卡/区域、危机合约赛季与行动地点）③ 职业与分支 ④ 作战机制与属性术语 ⑤ 社区黑话与练度术语（单核 / 满潜 / 专三 / 好抄 …）⑥ MAA 任务名与站内界面用词。
 - **不收录**（与作业战斗检索无关）：敌人/怪兽名、道具材料与家具、勋章、基建技能与房间、寻访名、模组名、技能名、肉鸽收藏品/结局/分队、世界观与种族（国家/种族/阵营/势力）、NPC。
 - 收录判据：该词在 `plainto_tsquery('chinese_zh', 词)` 下必须成为**单个词元**；已收录或本就能切成单词元的不重复收录（如 `单核` 曾被切成空词元、`练度` 被切成 `练`，这类词会让检索漏召回或大量误召回）。
-- **不要收录与已收录词子串重叠的长词**：SCWS 按最长匹配切分，加入长词 X 会让含 X 的文档不再命中其子串 Y 的查询（`引航者试炼` 吞掉 `试炼`、`简单好抄` 吞掉 `好抄`、`蚀刻章` 吞掉 `刻章`）。若拆开分词时检索已经准确，就不要加长词。
+- **不要收录与已收录词子串重叠的长词**：SCWS 按最长匹配切分，加入长词 X 会让含 X 的文档不再命中其子串 Y（3 字及以上）的查询。
+  2 字子串由 1.2 的 `multi_duality` 救回（实测 `刻章` 1414 = LIKE 1414），单字由 1.3 的 `multi_zmain` 救回，
+  真正会漏召回的是 3 字以上子串（`变格凯尔希` 吞掉 `凯尔希`）：查询侧 `plainto_tsquery` 要求精确词元，二元组补不回来。
+  若拆开分词时检索已经准确，就不要加长词。
 - 词条一律 `词 1.0 1.0 n`，只追加、不重排；自定义词典在 backend 首次使用时加载，改词典后需重建连接（生产为重启/重建容器），并 `REINDEX INDEX CONCURRENTLY idx_copilot_document_tsv` 让存量行按新词典重新分词（重建前必须关并行，见第 6 节）。
 - 校验方式：在挂载新词典的 zhparser 实例上，对全部词条执行 `to_tsvector('chinese_zh', 词)::text`，要求结果等于该词本身；再用真实语料对比 `plainto_tsquery` 命中数与字面命中数，确认没有把碎片写进词典。
 - 索引：`copilot.title` + `copilot.details` 的表达式 GIN 索引
 - 查询：`plainto_tsquery`，分词后所有词按 AND 匹配（任意位置、与顺序无关）；
   输入中的 `or` / `-` / 引号等**不会**被解释成运算符，而是当作普通文本分词
+
+- **2026-10 实测复核（`multi_duality` / `multi_zmain` 均开）**：对 220 对「短词 ⊂ 长词」逐对执行
+  `to_tsvector('chinese_zh', 长词) @@ plainto_tsquery('chinese_zh', 短词)`，其中 **65 个新增长词让 54 个基础词漏召回**：
+  zhparser 把长词切成单个词元，而查询侧 `plainto_tsquery` 要求该精确词元，二元组补不回来
+  （词典里有 `变格凯尔希` 时，搜 `凯尔希` 恰好漏掉这些作业）。这 65 个长词已从 `arknights.txt` 删除；
+  生产语料实测（83301 行、`"delete" = FALSE`）删除前后召回：`初雪` 955 → 1776（LIKE 1776）、
+  `多索雷斯` 260 → 433、`拉普兰德` 200 → 290、`能天使` 375 → 461、`嘉维尔` 56 → 78（LIKE 78）。
+- **没有任何 zhparser 配置项能绕过这条规则**：`pg_settings` 里 zhparser 只暴露 8 个 GUC
+  （`multi_duality` / `multi_short` / `multi_zmain` / `multi_zall` / `seg_with_duality` /
+  `punctuation_ignore` / `extra_dicts` / `dict_in_memory`），逐个打开后 `变格凯尔希` 依旧切成
+  `变格凯尔希 变格 格凯 凯尔 尔希 …`，不会产生 `凯尔希` 词元——二元组窗口固定为 2 字。
+- **残余漏召回来自「无分隔拼接」**：`凯尔希思衡托`（干员名 + 模组名连写）被切成
+  `凯 凯尔 尔 希 希思 思 托 衡`，`凯尔希` 词元直接消失（该词在 52 行详情里出现，FTS 只召回 194 行中的 142 行）。
+  把缺失段 `思衡托` 补进词典后切分恢复为 `凯尔希 思衡托`；遇到新的连写漏召回时补缺失段，而不是加长词。
 
 ### 1.2 检索口径：长词吞短词与 `multi_duality`（2026-10 补充）
 
@@ -97,6 +114,19 @@ SELECT to_tsvector('chinese_zh', '军用望远镜');  -- '军':1 '望':6 '望远
   返回 0 行，而 LIKE 各有 12006 / 2425 行。单字查询命中 0 行时先看是不是这一类；
 - 与 1.2 一样只能由服务端启动参数指定，**改完必须 REINDEX**（见第 6 节）。
 
+### 1.4 无 zhparser 环境的降级（2026-10 补充）
+
+本地开发、官方 `postgres` 镜像、以及 V4 在无 zhparser 时被整段跳过的库都没有 `chinese_zh` 配置。
+这种情况下检索**不报错**，而是降级为 `title`/`details` 的 LIKE 子串匹配
+（`CopilotDocumentSearch.FALLBACK_CONDITION`，应用侧见 `CopilotRepository`）：
+
+- 探测：首次文档检索时查一次 `pg_ts_config`，结果缓存在 repository 实例上；
+  之后补建了 zhparser 需要重启才会切回 FTS。
+- 语义差异：子串匹配而非分词 AND（`alpha beta` 只命中连续出现该串的作业）、不区分大小写、
+  `%`/`_` 按字面匹配（转义字符用 `!`：jdbi 的词法器会把「反斜杠 + 引号」当成转义引号，
+  `ESCAPE '\'` 会吞掉其后的 `?` 占位符）。
+- 性能：降级路径用不上 `idx_copilot_document_tsv`，大表上是顺序扫描，仅适合开发/测试环境。
+
 ## 2. 本次代码变更摘要
 
 - 删除 `ik-analyzer` 依赖；
@@ -105,15 +135,19 @@ SELECT to_tsvector('chinese_zh', '军用望远镜');  -- '军':1 '望':6 '望远
 - `CopilotRepository.queryCopilots` 新增 `documentKeyword` 条件，使用：
   `to_tsvector('chinese_zh', regexp_replace(coalesce(title,'') || ' ' || coalesce(details,''), '[A-Za-z0-9]+' 两侧补空格)) @@ plainto_tsquery('chinese_zh', regexp_replace(?, 同上))`
   （文档与查询关键字使用同一「ASCII 段补空格」归一化，见 4.7）；
-- 新增 Flyway `V3__zhparser_document_search.sql`（关卡号归一化索引已并入 V3；原 `V4__zhparser_level_code_tokenization.sql` 未发布，已删除）；
-- `arknights.txt` 每行追加 `1.0 1.0 n`，作为 zhparser 自定义词典使用；
+  表达式与归一化集中在 `CopilotDocumentSearch`，`CopilotRepositoryTest` 有一条测试断言它与本迁移的索引表达式一致
+  ——两者漂移不会报错，只会让规划器放弃索引、退化成全表扫描；
+- 没有 `chinese_zh` 配置时检索降级为 `title`/`details` 的 LIKE 子串匹配（见 1.4），
+  官方镜像与本地开发环境不会因缺 zhparser 让搜索 500；
+- 新增 Flyway `V4__zhparser_document_search.sql`（版本号避开 dev 已发布的 `V3__add_recommendation_snapshot.sql`；关卡号归一化索引已并入本文件；原 `V4__zhparser_level_code_tokenization.sql` 未发布，已删除）；
+- `arknights.txt` 每行追加 `1.0 1.0 n`，作为 zhparser 自定义词典使用；并删除 65 个会让基础词漏召回的长词（见 1.1 实测复核）；
 - `docker/docker-compose.yml`、`dev-docker/docker-compose.yml` 的 PG 镜像更新为 zhparser 镜像并挂载词典；
 - PG 启动参数增加 `-c zhparser.multi_duality=on`（检索口径见 1.2）、`-c zhparser.multi_zmain=on`
   （单字检索见 1.3），两个开关变更后都必须重建索引。
 
-## 3. Flyway V3 兜底逻辑
+## 3. Flyway V4 兜底逻辑
 
-`V3__zhparser_document_search.sql` 按以下顺序执行：
+`V4__zhparser_document_search.sql` 按以下顺序执行：
 
 1. 仅当 `pg_available_extensions` 中存在 `zhparser` 时执行
    `CREATE EXTENSION IF NOT EXISTS zhparser`；
@@ -123,7 +157,7 @@ SELECT to_tsvector('chinese_zh', '军用望远镜');  -- '军':1 '望':6 '望远
    zhparser 共声明 26 种 token type，未映射的类型会被 `to_tsvector` 静默丢弃：
    缺 `m` 时「精二」只剩「精」；助词(u)/标点(w)/介词(p)/连词(c) 等纯功能词则有意不映射。
    词典词性已统一为 `n`，无需映射 `x`。
-3. 创建表达式 GIN 索引（表达式与 `CopilotRepository.COPILOT_DOCUMENT_TSV_EXPR` 必须逐字一致）：
+3. 创建表达式 GIN 索引（表达式与 `CopilotDocumentSearch.DOCUMENT_TSV` 必须逐字一致）：
 
 ```sql
 CREATE INDEX IF NOT EXISTS idx_copilot_document_tsv
@@ -141,18 +175,18 @@ CREATE INDEX IF NOT EXISTS idx_copilot_document_tsv
     );
 ```
 
-> 如果应用数据库账号不是超级用户且没有 `CREATE EXTENSION` 权限，V3 会显式失败。
-> 此时应先在维护操作中由超级用户创建扩展，再启动应用，V3 会复用已有扩展。
+> 如果应用数据库账号不是超级用户且没有 `CREATE EXTENSION` 权限，V4 会显式失败。
+> 此时应先在维护操作中由超级用户创建扩展，再启动应用，V4 会复用已有扩展。
 >
-> 注意：Flyway 每个版本只执行一次。若某个库先在无 zhparser 的环境跑过 V3（迁移被跳过），
+> 注意：Flyway 每个版本只执行一次。若某个库先在无 zhparser 的环境跑过 V4（迁移被跳过），
 > 之后再切换到 zhparser 镜像，需要手动执行本文 4.5/4.6 中的建配置和建索引 SQL，
 > 或新增一个迁移版本补建。线上正式迁移时应在**切换 PG 镜像之后、首次启动新版应用之前**完成环境准备。
 >
-> 归一化（已并入 V3）：给每段 ASCII 字母数字补空格，
+> 归一化（已并入 V4）：给每段 ASCII 字母数字补空格，
 > 让 `H17` / `S3` / `IW-EX-1` 这类关卡号成为独立词元，原因与自查 SQL 见 4.7。
 >
 > 映射类型会直接影响 `to_tsvector` 的结果，而 PG 不会自动重建表达式索引：
-> 只有在索引尚未创建时（即 V3 首次生效前）调整映射才是安全的；
+> 只有在索引尚未创建时（即 V4 首次生效前）调整映射才是安全的；
 > 若某个库已经建好 `idx_copilot_document_tsv` 之后又改了映射，
 > 必须 `REINDEX INDEX idx_copilot_document_tsv;`，否则已有行仍是按旧映射算出来的词元。
 > 改的是**表达式**（例如关卡号归一化）则 `REINDEX` 不够，必须删掉索引重建，
@@ -284,18 +318,20 @@ PostgreSQL Database directory appears to contain a database; Skipping initializa
 docker compose exec -T database pg_isready -U postgres
 ```
 
-再启动/部署应用。Flyway V3 将：
+再启动/部署应用。Flyway V4 将：
 
 - 在存在 zhparser 时创建扩展（如果应用账号有权限）；
 - 创建 `chinese_zh`；
 - 创建 GIN 索引（含关卡号归一化，见 4.7）；
 - 若库里已有未归一化的旧索引，先删掉再按新表达式重建。
 
-> **未发布前的文件合并**：V4 的归一化索引已并入 V3（`V4__zhparser_level_code_tokenization.sql` 已删除）。
-> 本地或测试库里若已应用过拆分前的 V3/V4，Flyway 会以
-> `Migration checksum mismatch for migration version 3` 拒绝启动——删掉这些库
-> `flyway_schema_history` 里 `version IN ('3','4')` 的两行，让 V3 整体重新应用（幂等，含删旧索引重建）：
-> `DELETE FROM flyway_schema_history WHERE version IN ('3','4');`
+> **版本号与未发布前的文件合并**：本迁移曾编为 V3，与 dev 已发布的 `V3__add_recommendation_snapshot.sql`
+> 同版本号（Flyway 对同版本号直接拒绝启动），现已改为 V4；原本单独的
+> `V4__zhparser_level_code_tokenization.sql`（关卡号归一化索引）已并入本文件。
+> 本地或测试库若应用过拆分前的 zhparser 迁移，历史表里会残留旧记录，Flyway 会以
+> `Migration checksum mismatch` / `Detected applied migration not resolved locally` 拒绝启动——
+> 只删 script 为本迁移旧文件名的行（推荐快照的 V3 记录不受影响），下次启动 Flyway 会自动补应用 V3/V4（幂等，含删旧索引重建）：
+> `DELETE FROM flyway_schema_history WHERE script IN ('V3__zhparser_document_search.sql', 'V4__zhparser_level_code_tokenization.sql');`
 > 不要只跑 `flyway repair`：它只改记录不重建索引，会留下未归一化的旧索引。
 > 已发布给其他人的版本不会再改，不存在这个问题。
 
@@ -327,7 +363,7 @@ SELECT indexname FROM pg_indexes WHERE indexname = 'idx_copilot_document_tsv';
 -- 词典词性应为 n
 SELECT * FROM ts_debug('chinese_zh', '阿米娅 危机合约 龙门币');
 
--- 映射集应为 a,d,e,i,l,m,n,r,t,v（含 V3 新增的 d 副词 / r 代词 / m 数词）
+-- 映射集应为 a,d,e,i,l,m,n,r,t,v（含 V4 新增的 d 副词 / r 代词 / m 数词）
 SELECT t.alias, m.maptokentype
 FROM pg_ts_config_map m
 JOIN pg_ts_config c ON c.oid = m.mapcfg
@@ -401,10 +437,10 @@ WHERE "delete" = FALSE
 
 把 `H17` 换成其它关卡号（`IW-EX-1` / `S3` / `CE-5` / `1-7`）再跑一次；`fts_hits` 为 0 说明归一化没生效。
 
-## 5. 手工补建（仅限 V3 已在无 zhparser 环境执行过的情况）
+## 5. 手工补建（仅限 V4 已在无 zhparser 环境执行过的情况）
 
-如果某个库已经跑过 V3 且当时跳过了 zhparser 初始化，之后才切换到 zhparser 镜像，
-由超级用户执行（索引表达式照抄 V3，含归一化）：
+如果某个库已经跑过 V4 且当时跳过了 zhparser 初始化，之后才切换到 zhparser 镜像，
+由超级用户执行（索引表达式照抄 V4，含归一化）：
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS zhparser;
@@ -518,11 +554,11 @@ DROP EXTENSION IF EXISTS zhparser CASCADE;
 
 ## 8. 风险与注意事项
 
-1. **已有数据库不会执行镜像 initdb 脚本**。zhparser 的初始化依赖 Flyway V3
+1. **已有数据库不会执行镜像 initdb 脚本**。zhparser 的初始化依赖 Flyway V4
    或手动 SQL，镜像 init 脚本只对新建空库生效。
 2. **`CREATE INDEX` 会锁写并消耗磁盘**。`copilot` 数据量很大时，建议在维护窗口
    由 DBA 先执行 `CREATE INDEX CONCURRENTLY`，Flyway 中的 `IF NOT EXISTS` 会跳过。
-   手工建索引同样要先 `SET max_parallel_maintenance_workers = 0;`（V3 迁移内已设置）。
+   手工建索引同样要先 `SET max_parallel_maintenance_workers = 0;`（V4 迁移内已设置）。
 3. **词典或 `zhparser.multi_duality` / `multi_zmain` 变化后必须 REINDEX**，且 `REINDEX` 前要先 `SET max_parallel_maintenance_workers = 0;`，
    否则索引按另一套切词口径生成，命中会静默变少（自检 SQL 见第 6 节）。
 4. **生产镜像建议固定 digest 或自行构建**。`abcfy2/zhparser:18-alpine` 是浮动 tag，

@@ -14,8 +14,8 @@ import javax.sql.DataSource
  *
  * - 整个测试 JVM 只启动一次 zonky embedded PostgreSQL（companion 懒加载单例，JVM 退出时关闭），
  *   避免 zonky 默认按测试类逐个启动的开销。
- * - 建表走 **Flyway**（classpath:db/migration 下的 V1__init.sql 与 V3__zhparser_document_search.sql，
- *   与生产共用同一套迁移；V3 在无 zhparser 扩展的 embedded PG 中会自动跳过）；
+ * - 建表走 **Flyway**（classpath:db/migration，与生产共用同一套迁移；其中
+ *   V4__zhparser_document_search.sql 在无 zhparser 扩展的 embedded PG 中会自动跳过）；
  *   zonky 官方也有 FlywayPreparer 配套（JUnit5 extension 体系），此处基类是自定义单例，
  *   直接调 Flyway API 效果等价。
  * - embedded PG 没有 zhparser，故用内置 `simple` 建同名 `chinese_zh` 替身，覆盖 FTS 的 SQL 形状与绑定（见 [FTS_STANDIN_CREATE_SQL]）。
@@ -77,7 +77,7 @@ abstract class TestDbSupport {
         }
 
         /**
-         * embedded PG 没有 zhparser，V3 会整段跳过 → `chinese_zh` 不存在，FTS 查询会直接报
+         * embedded PG 没有 zhparser，V4 会整段跳过 → `chinese_zh` 不存在，FTS 查询会直接报
          * `text search configuration "chinese_zh" does not exist`。
          * 这里用内置 `simple` 配置复制一个同名替身（embedded PG 不会自带 zhparser，故无条件创建；
          * 假设失效会在此报错），让 FTS 的 SQL 形状 / 绑定 / 语义可以被断言。
