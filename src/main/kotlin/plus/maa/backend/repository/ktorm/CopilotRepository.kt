@@ -34,6 +34,18 @@ class CopilotRepository(private val jdbi: Jdbi) {
 
     private val dao: CopilotDao = jdbi.onDemand(CopilotDao::class.java)
 
+    /**
+     * 文档检索是否可用：探测一次 [CopilotDocumentSearch.CONFIG] 是否存在，结果在实例内缓存。
+     * 无 zhparser 的环境（官方 PG 镜像、本地开发、V4 迁移被跳过的库）降级为 LIKE 子串匹配，
+     * 而不是让检索直接报 `text search configuration "chinese_zh" does not exist`。
+     * 之后补建了 zhparser 需重启才能切回 FTS。
+     */
+    private val documentSearchAvailable: Boolean by lazy {
+        jdbi.withHandle<Boolean, Exception> { h ->
+            h.createQuery(CopilotDocumentSearch.AVAILABLE_SQL).mapTo(Boolean::class.java).one()
+        }
+    }
+
     /** updateEntity 脏检查快照；缓存未命中时退化为全列 UPDATE。 */
     private val snapshots: Cache<Long, CopilotEntity> = Caffeine.newBuilder()
         .maximumSize(COPILOT_SNAPSHOT_MAX_SIZE)
@@ -109,15 +121,6 @@ class CopilotRepository(private val jdbi: Jdbi) {
             "SELECT * FROM copilot WHERE copilot_id IN (${placeholders(ids)}) AND \"delete\" = FALSE",
             *ids.toTypedArray(),
         )
-    }
-
-    /**
-     * SegmentService 索引构建用：只读 copilot_id/title/details 三列。
-     */
-    fun findAllNotDeletedIdTitleDetails(): List<CopilotIndexRow> = jdbi.withHandle<List<CopilotIndexRow>, Exception> { h ->
-        h.createQuery("SELECT copilot_id, title, details FROM copilot WHERE \"delete\" = FALSE")
-            .mapTo(CopilotIndexRow::class.java)
-            .list()
     }
 
     fun findAllByUploadTimeAfterOrDeleteTimeAfter(uploadTimeAfter: LocalDateTime, deleteTimeAfter: LocalDateTime): List<CopilotEntity> =
@@ -239,8 +242,8 @@ class CopilotRepository(private val jdbi: Jdbi) {
 
     /**
      * CopilotService.query 的复合条件分页查询（delete=false 基条件 +
-     * 可选 type/status/stage_name LIKE/stage_name IN/uploader_id IN/copilot_id IN/
-     * 关注子查询/干员包含排除子查询 + 三键两向排序 + LIMIT/OFFSET + COUNT）。
+     * 可选 type/status/document FTS/stage_name LIKE/stage_name IN/uploader_id IN/
+     * copilot_id IN/关注子查询/干员包含排除子查询 + 三键两向排序 + LIMIT/OFFSET + COUNT）。
      *
      * 返回 (当前页实体, 过滤后总数)。空集合条件跳过。
      * `stageNameKeyword` 原样绑定（不带 % 通配符，基线 like 语义）。
@@ -275,6 +278,14 @@ class CopilotRepository(private val jdbi: Jdbi) {
         req.status?.let { add("status = ?", it.name) }
         req.stageNameKeyword?.let { add("stage_name LIKE ?", it) }
         req.stageNames?.let { addIn("stage_name", it) }
+        req.documentKeyword?.takeIf { it.isNotBlank() }?.let { keyword ->
+            if (documentSearchAvailable) {
+                add(CopilotDocumentSearch.QUERY_CONDITION, keyword)
+            } else {
+                val pattern = CopilotDocumentSearch.likePattern(keyword)
+                add(CopilotDocumentSearch.FALLBACK_CONDITION, pattern, pattern)
+            }
+        }
         req.inUserIds?.let { addIn("uploader_id", it) }
         req.inCopilotIds?.let { addIn("copilot_id", it) }
         req.onlyFollowingUserId?.let {
@@ -387,6 +398,11 @@ data class CopilotQueryRequest(
     /** 原样绑定（不带 % 通配符，基线 like 语义） */
     val stageNameKeyword: String? = null,
     val stageNames: List<String>? = null,
+    /**
+     * 非空白时对 title/details 做 zhparser 全文检索（分词结果按 AND 组合，不解释运算符）；
+     * 库里没有 chinese_zh 配置（无 zhparser 的环境）时降级为 LIKE 子串匹配。
+     */
+    val documentKeyword: String? = null,
     val inUserIds: List<Long>? = null,
     val inCopilotIds: List<Long>? = null,
     /** 非 null 时附加 uploader_id IN (SELECT follow_user_id FROM user_follow WHERE user_id = ?) */
@@ -398,15 +414,6 @@ data class CopilotQueryRequest(
     val desc: Boolean = true,
     val page: Int = 1,
     val limit: Int = 10,
-)
-
-/**
- * SegmentService 索引构建投影（只读 copilot_id/title/details 三列）。
- */
-data class CopilotIndexRow(
-    val copilotId: Long,
-    val title: String,
-    val details: String?,
 )
 
 /** batchUpdateHotScores 的单行载荷。 */

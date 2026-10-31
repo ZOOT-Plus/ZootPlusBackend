@@ -24,11 +24,6 @@ import javax.sql.DataSource
  * 因此这条注解等价于「迁移跑完才允许拿到 `Jdbi`」。Spring Boot 会自动给 JPA/JDBC 系组件加这层依赖，
  * 但 Jdbi 是第三方库、不在其自动探测范围内（官方文档：第三方数据访问库需用本注解标注），故必须显式写。
  *
- * 背景：`SegmentService.afterPropertiesSet` 会在启动期查 `copilot` 表。全新空库上若先跑到它、
- * 再跑迁移，就会抛 `relation "copilot" does not exist` 并让应用整个起不来（实测）。
- * 标注在 `Jdbi` 这一层而非某个具体服务：所有库访问都经由 `Jdbi`，新增的启动期查库代码自动被覆盖，
- * 不需要每个新服务各记一次。
- *
  * 注意：不能用「构造参数注入 `ObjectProvider<FlywayMigrationInitializer>`」来建立顺序——
  * `ObjectProvider` 是惰性句柄，注入它不产生实际依赖，实测无效。
  */

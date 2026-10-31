@@ -1,4 +1,3 @@
-version: '3.8'
 services:
   redis:
     image: redis:latest
@@ -8,13 +7,17 @@ services:
       - "6379:6379"
     restart: always
   db:
-    image: postgres:17-alpine
+    image: docker.io/abcfy2/zhparser:18-alpine
     container_name: postgres
     restart: always
+    command: ["postgres", "-c", "zhparser.extra_dicts=arknights.txt", "-c", "zhparser.multi_duality=on", "-c", "zhparser.multi_zmain=on"]
     ports:
       - "5432:5432"
     volumes:
-      - .././data/:/var/lib/postgresql/data/
+      # PG18 集群实际在 /var/lib/postgresql/18/docker；数据目录布局变更前务必按
+      # docs/zhparser-migration.md 4.1 预检，否则旧集群会被忽略并重新 initdb（看起来像丢数据）
+      - ../data/:/var/lib/postgresql/
+      - ../src/main/resources/arknights.txt:/usr/local/share/postgresql/tsearch_data/arknights.txt:ro
     environment:
       POSTGRES_PASSWORD: 1234
   zootplusbackend:
